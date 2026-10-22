@@ -79,6 +79,9 @@ struct SettingsView: View {
                         Text(option.title).tag(option)
                     }
                 }
+                if let model = monitor.model {
+                    LabeledContent("Keyboard", value: model)
+                }
                 LabeledContent("Status", value: monitor.status.description)
                 if let firmware = monitor.firmware {
                     LabeledContent("Firmware", value: firmware)

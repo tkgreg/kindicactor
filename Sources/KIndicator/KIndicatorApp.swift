@@ -81,10 +81,10 @@ struct MenuContent: View {
         if let layer = monitor.layer {
             Text("Layer \(layer): \(settings.name(for: layer))")
         }
-        Text(monitor.status.description)
-        if let name = monitor.deviceName {
-            Text(name)
+        if let keyboard = monitor.model ?? monitor.deviceName {
+            Text(keyboard)
         }
+        Text(statusLine)
         Divider()
         LightingMenu(monitor: monitor, settings: settings, lighting: lighting, openSettings: openSettings)
         Picker("Connection", selection: $settings.connection) {
@@ -99,6 +99,12 @@ struct MenuContent: View {
             NSApp.terminate(nil)
         }
         .keyboardShortcut("q")
+    }
+
+    /// "Connected via 2.4 GHz · Per-key RGB": the connection plus the saved lighting effect.
+    private var statusLine: String {
+        guard monitor.status.allowsLighting, let saved = lighting.saved else { return monitor.status.description }
+        return "\(monitor.status.description) · \(LightingEffect.name(saved.effect))"
     }
 
     private func openSettings() {

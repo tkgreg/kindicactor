@@ -59,6 +59,8 @@ final class KeyboardMonitor: ObservableObject {
     @Published private(set) var layerCount: Int?
     @Published private(set) var firmware: String?
     @Published private(set) var deviceName: String?
+    /// The keyboard's model; over 2.4 GHz asked from the dongle, which knows what's paired.
+    @Published private(set) var model: String?
 
     var isConnected: Bool {
         if case .connected = status { true } else { false }
@@ -73,6 +75,8 @@ final class KeyboardMonitor: ObservableObject {
         static let getLayerCount: UInt8 = 0x11
         static let getFirmwareVersion: UInt8 = 0xA1
         static let getActiveLayer: UInt8 = 0xA3
+        /// Answered by the dongle: up to 3 paired devices as (vid, pid, active), little-endian.
+        static let getReceiverState: UInt8 = 0xB2
     }
 
     private static let vendorID = 0x3434
@@ -88,6 +92,8 @@ final class KeyboardMonitor: ObservableObject {
         let inputSize: Int
         var layer: Int?
         var lastReply: ContinuousClock.Instant?
+        /// The keyboard's model: its own for the cable, the paired keyboard's for the dongle.
+        var model: String?
 
         init(device: IOHIDDevice, kind: ConnectionKind, name: String) {
             self.device = device
@@ -109,7 +115,7 @@ final class KeyboardMonitor: ObservableObject {
 
     private let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
     private var endpoints: [ObjectIdentifier: Endpoint] = [:]
-    private var bluetoothKeyboards: [ObjectIdentifier: String] = [:]
+    private var bluetoothKeyboards: [ObjectIdentifier: (name: String, model: String)] = [:]
     private var activeEndpoint: Endpoint?
     private var pendingRequests: [PendingRequest] = []
     private var lastPollAt: ContinuousClock.Instant?
@@ -176,7 +182,7 @@ final class KeyboardMonitor: ObservableObject {
             let isKeyboard = device.intProperty(kIOHIDPrimaryUsagePageKey) == kHIDPage_GenericDesktop
                 && device.intProperty(kIOHIDPrimaryUsageKey) == kHIDUsage_GD_Keyboard
             if transport.contains("bluetooth") && isKeyboard {
-                bluetoothKeyboards[id] = name
+                bluetoothKeyboards[id] = (name, Self.model(of: device, named: name))
                 refreshStatus()
             }
             return
@@ -196,6 +202,9 @@ final class KeyboardMonitor: ObservableObject {
         }
 
         let endpoint = Endpoint(device: device, kind: kind, name: name)
+        if kind != .dongle {
+            endpoint.model = Self.model(of: device, named: name)
+        }
         endpoints[id] = endpoint
 
         let context = Unmanaged.passUnretained(self).toOpaque()
@@ -334,16 +343,37 @@ final class KeyboardMonitor: ObservableObject {
             if wasSilent && otherApp == nil {
                 send(Command.getLayerCount, to: endpoint)
                 send(Command.getFirmwareVersion, to: endpoint)
+                if endpoint.kind == .dongle {
+                    send(Command.getReceiverState, to: endpoint)
+                }
             }
         case Command.getLayerCount where (1...32).contains(bytes[1]):
             layerCount = Int(bytes[1])
         case Command.getFirmwareVersion:
             let text = bytes.dropFirst().prefix { $0 != 0 }
             firmware = String(decoding: text, as: UTF8.self)
+        case Command.getReceiverState where endpoint.kind == .dongle && bytes.count >= 17:
+            // Three slots of 5 bytes from offset 2: vendor ID, product ID, active flag.
+            for offset in stride(from: 2, to: 17, by: 5) where bytes[offset + 4] != 0 {
+                let vendorID = Int(bytes[offset]) | Int(bytes[offset + 1]) << 8
+                let productID = Int(bytes[offset + 2]) | Int(bytes[offset + 3]) << 8
+                if vendorID == Self.vendorID {
+                    endpoint.model = KeyboardModel.name(productID: productID)
+                    log.notice("paired keyboard: \(endpoint.model ?? "-", privacy: .public)")
+                    break
+                }
+            }
         default:
             return
         }
         refreshStatus()
+    }
+
+    /// The model of a keyboard connected by cable or Bluetooth, remembered for the dongle.
+    private static func model(of device: IOHIDDevice, named name: String) -> String {
+        guard let productID = device.intProperty(kIOHIDProductIDKey) else { return name }
+        KeyboardModel.learn(name, productID: productID)
+        return KeyboardModel.name(productID: productID, productName: name)
     }
 
     /// The name of another process that has this raw HID interface open, from the
@@ -386,20 +416,25 @@ final class KeyboardMonitor: ObservableObject {
             newStatus = .paused(otherApp: otherApp)
             setIfChanged(\.layer, responding?.layer)
             setIfChanged(\.deviceName, (responding ?? allowed.first)?.name)
+            setIfChanged(\.model, (responding ?? allowed.first)?.model)
         } else if let responding {
             newStatus = .connected(responding.kind)
             setIfChanged(\.layer, responding.layer)
             setIfChanged(\.deviceName, responding.name)
+            setIfChanged(\.model, responding.model)
         } else {
-            if !bluetoothKeyboards.isEmpty && preference.allows(.bluetooth) {
+            if let keyboard = bluetoothKeyboards.values.first, preference.allows(.bluetooth) {
                 newStatus = .bluetoothOnly
-                setIfChanged(\.deviceName, bluetoothKeyboards.values.first)
+                setIfChanged(\.deviceName, keyboard.name)
+                setIfChanged(\.model, keyboard.model)
             } else if let endpoint = allowed.first {
                 newStatus = .noReply(endpoint.kind)
                 setIfChanged(\.deviceName, endpoint.name)
+                setIfChanged(\.model, endpoint.model)
             } else {
                 newStatus = .searching
                 setIfChanged(\.deviceName, nil)
+                setIfChanged(\.model, nil)
             }
             setIfChanged(\.layer, nil)
         }
