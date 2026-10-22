@@ -73,6 +73,8 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            LaunchActionsSection(settings: settings)
+
             Section {
                 Picker("Read layer via", selection: $settings.connection) {
                     ForEach(ConnectionPreference.allCases) { option in

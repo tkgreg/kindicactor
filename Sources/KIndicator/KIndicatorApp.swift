@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let settings = AppSettings()
     let monitor = KeyboardMonitor()
     lazy var lighting = LightingController(monitor: monitor, settings: settings)
+    lazy var launchActions = LaunchActionRunner(settings: settings)
     private var subscriptions: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -41,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &subscriptions)
         monitor.start()
         lighting.start()
+        launchActions.start()
         LoginItem.enableOnFirstLaunch()
     }
 

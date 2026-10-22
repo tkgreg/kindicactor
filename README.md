@@ -61,6 +61,14 @@ to **Keep saved** bring the saved lighting back. If you change the lighting with
 the keyboard's light keys while a layer's own lighting is on (Fn + light keys),
 those changes are kept and saved when you go back.
 
+## Launch actions
+
+**Settings › Launch actions** binds a global shortcut to "switch the input source,
+then open an app", e.g. ABC + Launchpad so Launchpad's search gets English letters
+even when Russian was selected. Shortcuts are Carbon hotkeys (no permissions
+needed); a Keychron Launcher macro on a key such as F4 can press the shortcut.
+Either half can be left out: "Keep input" or "No app".
+
 ## Keychron Launcher
 
 The keyboard answers every app that has its raw HID channel open, and drops a
