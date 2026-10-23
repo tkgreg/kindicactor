@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, layers, lighting, launchActions, connection
+    case general, layers, launchActions, connection
 
     var id: String { rawValue }
 
@@ -9,7 +9,6 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .general: "General"
         case .layers: "Layers"
-        case .lighting: "Lighting"
         case .launchActions: "Launch Actions"
         case .connection: "Connection"
         }
@@ -19,7 +18,6 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .general: "slider.horizontal.3"
         case .layers: "square.3.layers.3d"
-        case .lighting: "lightbulb"
         case .launchActions: "command"
         case .connection: "cable.connector"
         }
@@ -91,7 +89,7 @@ struct SettingsView: View {
         // Room for the window buttons above the sidebar.
         .padding(.top, 44)
         .padding([.horizontal, .bottom], 20)
-        .frame(width: 820, height: 560)
+        .frame(width: 940, height: 560)
         .background(Self.windowColor.ignoresSafeArea())
         .onAppear(perform: refreshLoginItem)
     }
@@ -100,7 +98,6 @@ struct SettingsView: View {
         switch tab {
         case .general: generalPage
         case .layers: layersPage
-        case .lighting: lightingPage
         case .launchActions: LaunchActionsSettings(settings: settings)
         case .connection: connectionPage
         }
@@ -137,44 +134,41 @@ struct SettingsView: View {
         }
     }
 
+    /// One row per layer: name and icon for the menu bar, lighting for the keyboard.
     @ViewBuilder private var layersPage: some View {
         SettingsGroup(title: "Layers") {
-            ForEach(0..<layerRows, id: \.self) { layer in
-                SettingsRow(title: "Layer \(layer)", isActive: monitor.layer == layer) {
-                    HStack(spacing: 8) {
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 12) {
+                GridRow {
+                    ForEach(["Layer", "Name", "Icon", "Lighting", "Color"], id: \.self) { heading in
+                        Text(heading)
+                    }
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                ForEach(0..<layerRows, id: \.self) { layer in
+                    GridRow {
+                        HStack(spacing: 6) {
+                            Text("Layer \(layer)")
+                                .font(.body.weight(.medium))
+                            if monitor.layer == layer {
+                                Image(systemName: "circle.fill")
+                                    .font(.system(size: 7))
+                                    .foregroundStyle(.green)
+                                    .help("Active now")
+                            }
+                        }
                         TextField("Name", text: nameBinding(for: layer),
                                   prompt: Text(AppSettings.placeholderName(for: layer)))
-                            .frame(width: 140)
-                            .help("Name")
-                        TextField("Icon", text: iconBinding(for: layer),
-                                  prompt: Text(AppSettings.placeholderIcon(for: layer)))
-                            .frame(width: 90)
-                            .help("Icon: SF Symbol name or up to 3 letters")
-                        Image(nsImage: MenuBarImage.icon(settings.icon(for: layer)))
-                            .renderingMode(.template)
-                            .frame(width: 24)
-                    }
-                    .labelsHidden()
-                    .textFieldStyle(.roundedBorder)
-                }
-            }
-            SettingsNote(text: "Each layer has a name and a menu bar icon. An icon is an SF Symbol name such as sun.max, moon or globe, or up to 3 letters shown in a box. Press Fn or flip the Mac/Win switch to see which layer is which: the green dot follows the active layer.")
-        }
-    }
-
-    @ViewBuilder private var lightingPage: some View {
-        SettingsGroup(title: "Lighting per layer") {
-            SettingsRow(title: "Change Lighting with Layer",
-                        description: "Show a layer's own effect while it's active, without saving it on the keyboard.") {
-                Toggle("Change Lighting with Layer", isOn: $settings.layerLightingEnabled)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-            }
-            ForEach(0..<layerRows, id: \.self) { layer in
-                SettingsRow(title: "Layer \(layer)",
-                            description: settings.name(for: layer),
-                            isActive: monitor.layer == layer) {
-                    HStack(spacing: 10) {
+                            .frame(width: 110)
+                        HStack(spacing: 6) {
+                            TextField("Icon", text: iconBinding(for: layer),
+                                      prompt: Text(AppSettings.placeholderIcon(for: layer)))
+                                .frame(width: 60)
+                                .help("SF Symbol name or up to 3 letters")
+                            Image(nsImage: MenuBarImage.icon(settings.icon(for: layer)))
+                                .renderingMode(.template)
+                                .frame(width: 22)
+                        }
                         Picker("Lighting", selection: effectBinding(for: layer)) {
                             Text("Keep saved").tag(-1)
                             Divider()
@@ -182,9 +176,10 @@ struct SettingsView: View {
                                 Text(LightingEffect.name(effect)).tag(Int(effect))
                             }
                         }
-                        .fixedSize()
-                        // Hidden rather than removed so the pickers stay aligned.
-                        Group {
+                        .frame(width: 160)
+                        .disabled(!settings.layerLightingEnabled)
+                        // Hidden rather than removed so the columns stay put.
+                        HStack(spacing: 6) {
                             ColorPicker("Color", selection: colorBinding(for: layer), supportsOpacity: false)
                             HexColorField(hue: settings.lighting(for: layer)?.hue ?? 0,
                                           saturation: settings.lighting(for: layer)?.saturation ?? 255) { hue, saturation in
@@ -193,14 +188,22 @@ struct SettingsView: View {
                                 lighting.saturation = saturation
                                 settings.setLighting(lighting, for: layer)
                             }
-                            .textFieldStyle(.roundedBorder)
                         }
                         .opacity(settings.lighting(for: layer) == nil ? 0 : 1)
-                        .disabled(settings.lighting(for: layer) == nil)
+                        .disabled(settings.lighting(for: layer) == nil || !settings.layerLightingEnabled)
                     }
-                    .labelsHidden()
-                    .disabled(!settings.layerLightingEnabled)
                 }
+            }
+            .labelsHidden()
+            .textFieldStyle(.roundedBorder)
+            SettingsNote(text: "Name and icon show in the menu bar. An icon is an SF Symbol name such as sun.max, moon or globe, or up to 3 letters shown in a box. Press Fn or flip the Mac/Win switch to see which layer is which: the green dot follows the active layer.")
+        }
+        SettingsGroup(title: "Lighting") {
+            SettingsRow(title: "Change Lighting with Layer",
+                        description: "Show a layer's own effect while it's active, without saving it on the keyboard.") {
+                Toggle("Change Lighting with Layer", isOn: $settings.layerLightingEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
             }
             SettingsNote(text: "Layers set to Keep saved show the lighting saved on the keyboard; change it from the menu bar › Lighting. Needs the cable or 2.4 GHz.")
         }

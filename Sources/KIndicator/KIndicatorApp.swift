@@ -146,7 +146,7 @@ struct LightingMenu: View {
                 if settings.hasLayerLighting {
                     Toggle("Change with Layer", isOn: $settings.layerLightingEnabled)
                 }
-                Button("Lighting per Layer…") { openSettings(.lighting) }
+                Button("Lighting per Layer…") { openSettings(.layers) }
             } else {
                 Text(monitor.status.lightingUnavailable)
             }

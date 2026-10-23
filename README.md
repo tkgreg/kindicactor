@@ -55,7 +55,7 @@ the keyboard, like Keychron Launcher. It uses the same
 raw HID channel (`0x07` set / `0x08` get / `0x09` save on channel `3`), so it works
 over the cable and 2.4 GHz but not Bluetooth.
 
-**Settings › Lighting** gives a layer its own effect and colour. While
+**Settings › Layers** also gives each layer its own effect and colour. While
 that layer is active the keyboard shows it without saving it to flash; layers set
 to **Keep saved** bring the saved lighting back. If you change the lighting with
 the keyboard's light keys while a layer's own lighting is on (Fn + light keys),
