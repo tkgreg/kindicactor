@@ -9,6 +9,8 @@ Keychron's ZMK keyboards (like the V6 Ultra 8K) don't tell you which layer is on
 Hold Fn, lock a layer with a TG key or flip the Mac/Win switch, and you're guessing.
 KIndicator reads the active layer from the keyboard and shows it in the menu bar.
 
+[Download Latest Version 1.0](https://github.com/tkgreg/kindicactor/releases/tag/v1.0)
+
 ## Features
 
 - **Active layer in the menu bar.** Each layer gets your own name and icon: an SF
