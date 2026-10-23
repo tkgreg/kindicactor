@@ -35,7 +35,7 @@ KIndicator reads the active layer from the keyboard and shows it in the menu bar
 
 ## Download
 
-Get the latest `KIndicator.dmg` from
+Get the latest `KIndicator-<version>.dmg` from
 [Releases](https://github.com/tkgreg/kindicactor/releases/latest), open it and drag
 **KIndicator** to **Applications**. The app is signed and notarized by Apple.
 
