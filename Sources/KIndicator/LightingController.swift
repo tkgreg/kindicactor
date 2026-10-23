@@ -11,16 +11,29 @@ private let log = Logger(subsystem: "local.kindicator", category: "lighting")
 ///
 /// Only values that differ from what the keyboard shows are sent: setting the effect is
 /// slow (60–100 ms) and resending brightness loses a step to rounding each time.
+///
+/// While its lights are off the keyboard reports the effect as Off, ignores colour and
+/// brightness, and keeps the effect its light key turns back on.
 @MainActor
 final class LightingController: ObservableObject {
     /// The lighting stored on the keyboard; nil until it has been read.
-    @Published private(set) var saved: Lighting?
+    @Published private(set) var saved: Lighting? {
+        didSet {
+            if let effect = saved?.effect, effect != 0, effect != keptEffect { keptEffect = effect }
+        }
+    }
+
+    /// The effect the keyboard keeps while its lights are off: the last one seen on.
+    /// A layer's lighting replaces it, so it's put back before the lights go off.
+    private var keptEffect: UInt8? {
+        didSet { if let keptEffect { UserDefaults.standard.set(Int(keptEffect), forKey: Self.keptEffectKey) } }
+    }
+    private static let keptEffectKey = "keptLightingEffect"
 
     private let monitor: KeyboardMonitor
     private let settings: AppSettings
     /// A layer's lighting currently shown on the keyboard (not saved), if any.
     private var applied: LayerLighting?
-    private var savedReadAt: ContinuousClock.Instant?
     /// Menu changes not yet sent; a refresh in between would undo them in the menu.
     private var pendingChanges = 0
     private var queue: Task<Void, Never>?
@@ -31,6 +44,7 @@ final class LightingController: ObservableObject {
     init(monitor: KeyboardMonitor, settings: AppSettings) {
         self.monitor = monitor
         self.settings = settings
+        keptEffect = (UserDefaults.standard.object(forKey: Self.keptEffectKey) as? Int).flatMap(UInt8.init(exactly:))
     }
 
     func start() {
@@ -80,7 +94,6 @@ final class LightingController: ObservableObject {
                 return
             }
             await self.save()
-            self.savedReadAt = .now
             log.notice("saved \(LightingEffect.name(lighting.effect), privacy: .public)")
             if let applied = self.applied {
                 await self.write(self.overlay(applied, on: lighting), over: lighting)
@@ -91,12 +104,7 @@ final class LightingController: ObservableObject {
     /// Puts the saved lighting back before the app quits, without waiting for replies.
     func restoreBeforeQuit() {
         guard let applied, let saved else { return }
-        if (applied.hue, applied.saturation) != (saved.hue, saved.saturation) {
-            monitor.sendNow(Self.setCommand(LightingCommand.color, [saved.hue, saved.saturation]))
-        }
-        if applied.effect != saved.effect {
-            monitor.sendNow(Self.setCommand(LightingCommand.effect, [saved.effect]))
-        }
+        commands(for: saved, over: overlay(applied, on: saved)).forEach(monitor.sendNow)
     }
 
     // MARK: - Per-layer lighting
@@ -116,9 +124,9 @@ final class LightingController: ObservableObject {
         guard target != applied else { return }
 
         if let target {
-            if applied == nil, saved == nil || savedReadAt.map({ ContinuousClock.now - $0 > .seconds(5) }) ?? true {
-                await refreshSaved()
-            }
+            // The 3 s refresh may not have seen lights just turned off with the keyboard's keys,
+            // and colour sent before turning them back on is ignored: read them now.
+            if applied == nil { await refreshSaved() }
             guard let saved else { return }
             guard await write(overlay(target, on: saved), over: shown(saved)) else { return }
             applied = target
@@ -139,6 +147,7 @@ final class LightingController: ObservableObject {
         // keyboard; keep those changes and save them instead of undoing them.
         var changedOnKeyboard = false
         if let now = await read() {
+            log.notice("keyboard shows \(now.summary, privacy: .public)")
             if abs(Int(now.brightness) - Int(lighting.brightness)) > 2 {
                 lighting.brightness = now.brightness
                 changedOnKeyboard = true
@@ -162,7 +171,6 @@ final class LightingController: ObservableObject {
         guard await write(lighting, over: current) else { return }
         if changedOnKeyboard { await save() }
         saved = lighting
-        savedReadAt = .now
         self.applied = nil
     }
 
@@ -185,8 +193,10 @@ final class LightingController: ObservableObject {
 
     private func refreshSaved() async {
         guard applied == nil, pendingChanges == 0, let lighting = await read() else { return }
-        savedReadAt = .now
-        if saved != lighting { saved = lighting }
+        if saved != lighting {
+            log.notice("read \(lighting.summary, privacy: .public)")
+            saved = lighting
+        }
     }
 
     private func read() async -> Lighting? {
@@ -203,29 +213,49 @@ final class LightingController: ObservableObject {
     /// one the keyboard doesn't answer.
     @discardableResult
     private func write(_ target: Lighting, over current: Lighting) async -> Bool {
-        if (target.hue, target.saturation) != (current.hue, current.saturation) {
-            guard await set(LightingCommand.color, [target.hue, target.saturation]) else { return false }
-        }
-        if target.brightness != current.brightness {
-            guard await set(LightingCommand.brightness, [target.brightness]) else { return false }
-        }
-        if target.speed != current.speed {
-            guard await set(LightingCommand.speed, [target.speed]) else { return false }
-        }
-        if target.effect != current.effect {
-            guard await set(LightingCommand.effect, [target.effect]) else { return false }
+        let commands = commands(for: target, over: current)
+        // "0217 0415ff": value id and data of each set command, in order.
+        let sent = commands.map { $0.dropFirst(2).map { String(format: "%02x", $0) }.joined() }
+        log.notice("write \(target.summary, privacy: .public) over \(current.summary, privacy: .public): \(sent.joined(separator: " "), privacy: .public)")
+        for command in commands {
+            guard await monitor.request(command) != nil else { return false }
         }
         return true
+    }
+
+    /// The set commands that take the keyboard from `current` to `target`. The effect goes
+    /// last so the new effect starts in the new colour, except when the lights are off.
+    private func commands(for target: Lighting, over current: Lighting) -> [[UInt8]] {
+        var commands: [[UInt8]] = []
+        var effect = current.effect
+        if effect == 0, target.effect != 0 {
+            // Colour and brightness sent while off are ignored.
+            commands.append(Self.setCommand(LightingCommand.effect, [target.effect]))
+            effect = target.effect
+        } else if target.effect == 0, effect != 0, let keptEffect, keptEffect != effect {
+            // Otherwise the light key would turn back on with the layer's effect.
+            commands.append(Self.setCommand(LightingCommand.effect, [keptEffect]))
+            effect = keptEffect
+        }
+        if (target.hue, target.saturation) != (current.hue, current.saturation) {
+            commands.append(Self.setCommand(LightingCommand.color, [target.hue, target.saturation]))
+        }
+        if target.brightness != current.brightness {
+            commands.append(Self.setCommand(LightingCommand.brightness, [target.brightness]))
+        }
+        if target.speed != current.speed {
+            commands.append(Self.setCommand(LightingCommand.speed, [target.speed]))
+        }
+        if target.effect != effect {
+            commands.append(Self.setCommand(LightingCommand.effect, [target.effect]))
+        }
+        return commands
     }
 
     private func get(_ value: UInt8) async -> [UInt8]? {
         let request = [LightingCommand.getValue, LightingCommand.rgbMatrixChannel, value]
         guard let reply = await monitor.request(request), reply.count >= 5 else { return nil }
         return Array(reply[3...])
-    }
-
-    private func set(_ value: UInt8, _ data: [UInt8]) async -> Bool {
-        await monitor.request(Self.setCommand(value, data)) != nil
     }
 
     private func save() async {
