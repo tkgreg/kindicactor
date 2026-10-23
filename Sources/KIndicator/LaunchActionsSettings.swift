@@ -1,15 +1,16 @@
 import AppKit
 import SwiftUI
 
-/// Settings rows for `LaunchAction`s: shortcut, input source, app.
-struct LaunchActionsSection: View {
+/// The Launch Actions page: one row per `LaunchAction` (shortcut, input source, app).
+struct LaunchActionsSettings: View {
     @ObservedObject var settings: AppSettings
     @State private var inputSources = InputSources.available()
 
     var body: some View {
-        Section {
+        SettingsGroup(title: "Launch actions") {
+            SettingsNote(text: "Press a shortcut anywhere: KIndicator switches the input source, then opens the app. In Keychron Launcher, set a key's macro (e.g. F4) to press the shortcut.")
             ForEach($settings.launchActions) { $action in
-                HStack(spacing: 8) {
+                HStack(spacing: 10) {
                     HotkeyRecorder(hotkey: $action.hotkey)
                     Picker("Input source", selection: $action.inputSourceID) {
                         Text("Keep input").tag(String?.none)
@@ -17,7 +18,7 @@ struct LaunchActionsSection: View {
                             Text(source.name).tag(Optional(source.id))
                         }
                     }
-                    .frame(width: 110)
+                    .frame(width: 130)
                     appMenu(for: $action)
                     Spacer(minLength: 0)
                     Button {
@@ -34,11 +35,6 @@ struct LaunchActionsSection: View {
             Button("Add Launch Action") {
                 settings.launchActions.append(.makeDefault())
             }
-        } header: {
-            Text("Launch actions")
-        } footer: {
-            Text("Press the shortcut anywhere: KIndicator switches the input source, then opens the app. In Keychron Launcher, set a key's macro (e.g. F4) to press the shortcut.")
-                .foregroundStyle(.secondary)
         }
         .onAppear { inputSources = InputSources.available() }
     }
@@ -62,7 +58,7 @@ struct LaunchActionsSection: View {
                 Text("No app")
             }
         }
-        .frame(width: 130)
+        .frame(width: 150)
     }
 
     private func chooseApp(for action: Binding<LaunchAction>) {

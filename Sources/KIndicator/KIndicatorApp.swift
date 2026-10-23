@@ -19,6 +19,7 @@ struct KIndicatorApp: App {
             SettingsView(monitor: appDelegate.monitor, settings: appDelegate.settings,
                          lighting: appDelegate.lighting)
         }
+        .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
         .defaultLaunchBehavior(.suppressed)
         .restorationBehavior(.disabled)
@@ -94,7 +95,7 @@ struct MenuContent: View {
                 Text(option.title).tag(option)
             }
         }
-        Button("Settings…", action: openSettings)
+        Button("Settings…") { openSettings() }
             .keyboardShortcut(",")
         Divider()
         Button("Quit KIndicator") {
@@ -109,9 +110,19 @@ struct MenuContent: View {
         return "\(monitor.status.description) · \(LightingEffect.name(saved.effect))"
     }
 
-    private func openSettings() {
+    private func openSettings(_ tab: SettingsTab? = nil) {
+        if let tab {
+            UserDefaults.standard.set(tab.rawValue, forKey: SettingsView.tabKey)
+        }
         openWindow(id: SettingsView.windowID)
-        NSApp.activate()
+        // Asking to activate while the menu is still closing is ignored, and opening a
+        // window doesn't raise a menu bar app: do both once the menu is gone.
+        DispatchQueue.main.async {
+            NSApp.activate()
+            let window = NSApp.windows.first { $0.identifier?.rawValue.hasPrefix(SettingsView.windowID) == true }
+            window?.makeKeyAndOrderFront(nil)
+            window?.orderFrontRegardless()
+        }
     }
 }
 
@@ -120,7 +131,7 @@ struct LightingMenu: View {
     @ObservedObject var monitor: KeyboardMonitor
     @ObservedObject var settings: AppSettings
     @ObservedObject var lighting: LightingController
-    let openSettings: () -> Void
+    let openSettings: (SettingsTab?) -> Void
 
     var body: some View {
         Menu("Lighting") {
@@ -135,7 +146,7 @@ struct LightingMenu: View {
                 if settings.hasLayerLighting {
                     Toggle("Change with Layer", isOn: $settings.layerLightingEnabled)
                 }
-                Button("Lighting per Layer…", action: openSettings)
+                Button("Lighting per Layer…") { openSettings(.lighting) }
             } else {
                 Text(monitor.status.lightingUnavailable)
             }

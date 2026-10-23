@@ -38,13 +38,13 @@ Monitoring permission.
 ## Default layer names
 
 The stock V6 Ultra keymap has 4 layers: `0 Mac`, `1 Mac Fn`, `2 Win`, `3 Win Fn`.
-Rename them in **Settings…**. The green dot next to a layer follows the active
+Rename them in **Settings › Layers**. The green dot next to a layer follows the active
 one, which makes it easy to see which number is which.
 
 ## Layer icons
 
 Each layer has an icon, shown in the menu bar on its own by default (or with the
-name, or just the name; see **Settings › Menu bar › Show**). An icon is either an
+name, or just the name; see **Settings › General › Show**). An icon is either an
 SF Symbol name such as `sun.max`, `moon` or `globe`, or up to 3 letters drawn in an
 outline square. Defaults: `sun.max`, `Fn`, `W`, `Fn`.
 
@@ -55,7 +55,7 @@ the keyboard, like Keychron Launcher. It uses the same
 raw HID channel (`0x07` set / `0x08` get / `0x09` save on channel `3`), so it works
 over the cable and 2.4 GHz but not Bluetooth.
 
-**Settings › Lighting per layer** gives a layer its own effect and colour. While
+**Settings › Lighting** gives a layer its own effect and colour. While
 that layer is active the keyboard shows it without saving it to flash; layers set
 to **Keep saved** bring the saved lighting back. If you change the lighting with
 the keyboard's light keys while a layer's own lighting is on (Fn + light keys),
@@ -63,7 +63,7 @@ those changes are kept and saved when you go back.
 
 ## Launch actions
 
-**Settings › Launch actions** binds a global shortcut to "switch the input source,
+**Settings › Launch Actions** binds a global shortcut to "switch the input source,
 then open an app", e.g. ABC + Launchpad so Launchpad's search gets English letters
 even when Russian was selected. Shortcuts are Carbon hotkeys (no permissions
 needed); a Keychron Launcher macro on a key such as F4 can press the shortcut.

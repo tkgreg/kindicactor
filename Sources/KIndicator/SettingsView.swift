@@ -1,11 +1,40 @@
 import SwiftUI
 
+enum SettingsTab: String, CaseIterable, Identifiable {
+    case general, layers, lighting, launchActions, connection
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .general: "General"
+        case .layers: "Layers"
+        case .lighting: "Lighting"
+        case .launchActions: "Launch Actions"
+        case .connection: "Connection"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .general: "slider.horizontal.3"
+        case .layers: "square.3.layers.3d"
+        case .lighting: "lightbulb"
+        case .launchActions: "command"
+        case .connection: "cable.connector"
+        }
+    }
+}
+
+/// A sidebar of sections and a rounded panel of rows, without a title bar.
 struct SettingsView: View {
     static let windowID = "settings"
+    static let tabKey = "settingsTab"
 
     @ObservedObject var monitor: KeyboardMonitor
     @ObservedObject var settings: AppSettings
     @ObservedObject var lighting: LightingController
+    @AppStorage(SettingsView.tabKey) private var tab = SettingsTab.layers
     @State private var launchAtLogin = LoginItem.isEnabled
     @State private var loginNeedsApproval = LoginItem.needsApproval
 
@@ -13,125 +42,209 @@ struct SettingsView: View {
         max(monitor.layerCount ?? AppSettings.defaultLayerNames.count, 1)
     }
 
+    /// Dark mode: #1E1E1E window, #252525 panel. Light mode: the system window colour
+    /// and an off-white panel. Grays are given in sRGB: `NSColor(white:)` is gamma-2.2
+    /// gray and comes out lighter than its number.
+    private static let windowColor = Color(nsColor: NSColor(name: nil) { appearance in
+        isDark(appearance) ? gray(0x1E) : .windowBackgroundColor
+    })
+
+    private static let panelColor = Color(nsColor: NSColor(name: nil) { appearance in
+        isDark(appearance) ? gray(0x25) : gray(0xF7)
+    })
+
+    private static func isDark(_ appearance: NSAppearance) -> Bool {
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    }
+
+    private static func gray(_ level: CGFloat) -> NSColor {
+        NSColor(srgbRed: level / 255, green: level / 255, blue: level / 255, alpha: 1)
+    }
+
     var body: some View {
-        Form {
-            Section {
-                ForEach(0..<layerRows, id: \.self) { layer in
-                    LabeledContent {
-                        HStack(spacing: 8) {
-                            TextField("Name", text: nameBinding(for: layer),
-                                      prompt: Text(AppSettings.placeholderName(for: layer)))
-                                .help("Name")
-                            TextField("Icon", text: iconBinding(for: layer),
-                                      prompt: Text(AppSettings.placeholderIcon(for: layer)))
-                                .help("Icon: SF Symbol name or up to 3 letters")
-                                .frame(width: 90)
-                            Image(nsImage: MenuBarImage.icon(settings.icon(for: layer)))
-                                .renderingMode(.template)
-                                .frame(width: 22)
-                        }
-                        .labelsHidden()
-                        .textFieldStyle(.roundedBorder)
-                    } label: {
-                        layerLabel(layer)
-                    }
+        HStack(alignment: .top, spacing: 20) {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(SettingsTab.allCases) { item in
+                    SettingsSidebarItem(title: item.title, systemImage: item.systemImage,
+                                        isSelected: tab == item) { tab = item }
                 }
-            } header: {
-                Text("Layers")
-            } footer: {
-                Text("Icon: an SF Symbol name such as sun.max, moon or globe, or up to 3 letters to show in a square. Press Fn or flip the Mac/Win switch to see which layer is which: the green dot follows the active layer.")
-                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
             }
+            .frame(width: 190)
 
-            Section {
-                Toggle("Change lighting with layer", isOn: $settings.layerLightingEnabled)
-                ForEach(0..<layerRows, id: \.self) { layer in
-                    LabeledContent {
-                        HStack(spacing: 8) {
-                            Picker("Lighting", selection: effectBinding(for: layer)) {
-                                Text("Keep saved").tag(-1)
-                                Divider()
-                                ForEach(LightingEffect.ids, id: \.self) { effect in
-                                    Text(LightingEffect.name(effect)).tag(Int(effect))
-                                }
-                            }
-                            // Hidden rather than removed so the pickers stay aligned.
-                            ColorPicker("Color", selection: colorBinding(for: layer), supportsOpacity: false)
-                                .opacity(settings.lighting(for: layer) == nil ? 0 : 1)
-                                .disabled(settings.lighting(for: layer) == nil)
-                        }
-                        .labelsHidden()
-                        .disabled(!settings.layerLightingEnabled)
-                    } label: {
-                        layerLabel(layer)
-                    }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 36) {
+                    page
                 }
-            } header: {
-                Text("Lighting per layer")
-            } footer: {
-                Text("While a layer with its own lighting is active, the keyboard shows it without saving it. Layers set to Keep saved show your saved lighting (menu bar › Lighting). Needs the cable or 2.4 GHz.")
-                    .foregroundStyle(.secondary)
+                .padding(28)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Self.panelColor)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08))
+            )
+        }
+        // Room for the window buttons above the sidebar.
+        .padding(.top, 44)
+        .padding([.horizontal, .bottom], 20)
+        .frame(width: 820, height: 560)
+        .background(Self.windowColor.ignoresSafeArea())
+        .onAppear(perform: refreshLoginItem)
+    }
 
-            LaunchActionsSection(settings: settings)
+    @ViewBuilder private var page: some View {
+        switch tab {
+        case .general: generalPage
+        case .layers: layersPage
+        case .lighting: lightingPage
+        case .launchActions: LaunchActionsSettings(settings: settings)
+        case .connection: connectionPage
+        }
+    }
 
-            Section {
-                Picker("Read layer via", selection: $settings.connection) {
-                    ForEach(ConnectionPreference.allCases) { option in
-                        Text(option.title).tag(option)
-                    }
-                }
-                if let model = monitor.model {
-                    LabeledContent("Keyboard", value: model)
-                }
-                LabeledContent("Status", value: monitor.status.description)
-                if let firmware = monitor.firmware {
-                    LabeledContent("Firmware", value: firmware)
-                }
-            } header: {
-                Text("Connection")
-            } footer: {
-                Text("Auto uses whichever connection answers, preferring the cable. Over Bluetooth the keyboard firmware doesn't expose the layer, so use 2.4 GHz or the cable.")
-                    .foregroundStyle(.secondary)
-            }
+    // MARK: - Pages
 
-            Section("Menu bar") {
+    @ViewBuilder private var generalPage: some View {
+        SettingsGroup(title: "Menu bar") {
+            SettingsRow(title: "Show",
+                        description: "What the menu bar shows for the active layer.") {
                 Picker("Show", selection: $settings.menuBarStyle) {
                     ForEach(MenuBarStyle.allCases) { style in
                         Text(style.title).tag(style)
                     }
                 }
-                Picker("Check layer every", selection: $settings.pollIntervalMs) {
+                .labelsHidden()
+                .fixedSize()
+            }
+        }
+        SettingsGroup(title: "Startup") {
+            SettingsRow(title: "Open at Login",
+                        description: "Start KIndicator automatically when you log in.") {
+                Toggle("Open at Login", isOn: launchAtLoginBinding)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+            if loginNeedsApproval {
+                SettingsRow(title: "Needs approval",
+                            description: "macOS asks you to allow KIndicator in Login Items.") {
+                    Button("Open System Settings…") { LoginItem.openSystemSettings() }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var layersPage: some View {
+        SettingsGroup(title: "Layers") {
+            ForEach(0..<layerRows, id: \.self) { layer in
+                SettingsRow(title: "Layer \(layer)", isActive: monitor.layer == layer) {
+                    HStack(spacing: 8) {
+                        TextField("Name", text: nameBinding(for: layer),
+                                  prompt: Text(AppSettings.placeholderName(for: layer)))
+                            .frame(width: 140)
+                            .help("Name")
+                        TextField("Icon", text: iconBinding(for: layer),
+                                  prompt: Text(AppSettings.placeholderIcon(for: layer)))
+                            .frame(width: 90)
+                            .help("Icon: SF Symbol name or up to 3 letters")
+                        Image(nsImage: MenuBarImage.icon(settings.icon(for: layer)))
+                            .renderingMode(.template)
+                            .frame(width: 24)
+                    }
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+                }
+            }
+            SettingsNote(text: "Each layer has a name and a menu bar icon. An icon is an SF Symbol name such as sun.max, moon or globe, or up to 3 letters shown in a box. Press Fn or flip the Mac/Win switch to see which layer is which: the green dot follows the active layer.")
+        }
+    }
+
+    @ViewBuilder private var lightingPage: some View {
+        SettingsGroup(title: "Lighting per layer") {
+            SettingsRow(title: "Change Lighting with Layer",
+                        description: "Show a layer's own effect while it's active, without saving it on the keyboard.") {
+                Toggle("Change Lighting with Layer", isOn: $settings.layerLightingEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+            ForEach(0..<layerRows, id: \.self) { layer in
+                SettingsRow(title: "Layer \(layer)",
+                            description: settings.name(for: layer),
+                            isActive: monitor.layer == layer) {
+                    HStack(spacing: 10) {
+                        Picker("Lighting", selection: effectBinding(for: layer)) {
+                            Text("Keep saved").tag(-1)
+                            Divider()
+                            ForEach(LightingEffect.ids, id: \.self) { effect in
+                                Text(LightingEffect.name(effect)).tag(Int(effect))
+                            }
+                        }
+                        .fixedSize()
+                        // Hidden rather than removed so the pickers stay aligned.
+                        Group {
+                            ColorPicker("Color", selection: colorBinding(for: layer), supportsOpacity: false)
+                            HexColorField(hue: settings.lighting(for: layer)?.hue ?? 0,
+                                          saturation: settings.lighting(for: layer)?.saturation ?? 255) { hue, saturation in
+                                guard var lighting = settings.lighting(for: layer) else { return }
+                                lighting.hue = hue
+                                lighting.saturation = saturation
+                                settings.setLighting(lighting, for: layer)
+                            }
+                            .textFieldStyle(.roundedBorder)
+                        }
+                        .opacity(settings.lighting(for: layer) == nil ? 0 : 1)
+                        .disabled(settings.lighting(for: layer) == nil)
+                    }
+                    .labelsHidden()
+                    .disabled(!settings.layerLightingEnabled)
+                }
+            }
+            SettingsNote(text: "Layers set to Keep saved show the lighting saved on the keyboard; change it from the menu bar › Lighting. Needs the cable or 2.4 GHz.")
+        }
+    }
+
+    @ViewBuilder private var connectionPage: some View {
+        SettingsGroup(title: "Keyboard") {
+            SettingsRow(title: "Model") {
+                Text(monitor.model ?? "–").foregroundStyle(.secondary)
+            }
+            SettingsRow(title: "Status") {
+                Text(monitor.status.description).foregroundStyle(.secondary)
+            }
+            if let firmware = monitor.firmware {
+                SettingsRow(title: "Firmware") {
+                    Text(firmware).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+            }
+        }
+        SettingsGroup(title: "Connection") {
+            SettingsRow(title: "Read Layer Via",
+                        description: "Auto uses whichever connection answers, preferring the cable. Over Bluetooth the keyboard doesn't report its layer.") {
+                Picker("Read Layer Via", selection: $settings.connection) {
+                    ForEach(ConnectionPreference.allCases) { option in
+                        Text(option.title).tag(option)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            SettingsRow(title: "Check Layer Every",
+                        description: "How often KIndicator asks the keyboard for its layer.") {
+                Picker("Check Layer Every", selection: $settings.pollIntervalMs) {
                     ForEach(AppSettings.pollIntervals, id: \.self) { ms in
                         Text(ms < 1000 ? "\(ms) ms" : "\(ms / 1000) s").tag(ms)
                     }
                 }
-            }
-
-            Section("General") {
-                Toggle("Open at login", isOn: launchAtLoginBinding)
-                if loginNeedsApproval {
-                    Button("Allow in System Settings…") { LoginItem.openSystemSettings() }
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .frame(width: 500)
-        .frame(minHeight: 400, idealHeight: 720)
-        .onAppear(perform: refreshLoginItem)
-    }
-
-    private func layerLabel(_ layer: Int) -> some View {
-        HStack(spacing: 6) {
-            Text("Layer \(layer)")
-            if monitor.layer == layer {
-                Image(systemName: "circle.fill")
-                    .foregroundStyle(.green)
-                    .imageScale(.small)
-                    .help("Active now")
+                .labelsHidden()
+                .fixedSize()
             }
         }
     }
+
+    // MARK: - Bindings
 
     /// -1 means Keep saved.
     private func effectBinding(for layer: Int) -> Binding<Int> {
