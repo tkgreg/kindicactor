@@ -31,6 +31,7 @@ final class AppSettings: ObservableObject {
         static let layerLighting = "layerLighting"
         static let layerLightingEnabled = "layerLightingEnabled"
         static let lightsOffWhileDisplaysSleep = "lightsOffWhileDisplaysSleep"
+        static let micIndicator = "micIndicator"
         static let launchActions = "launchActions"
     }
 
@@ -61,6 +62,9 @@ final class AppSettings: ObservableObject {
     @Published var lightsOffWhileDisplaysSleep: Bool {
         didSet { defaults.set(lightsOffWhileDisplaysSleep, forKey: Key.lightsOffWhileDisplaysSleep) }
     }
+    @Published var micIndicator: MicIndicator {
+        didSet { defaults.set(try? JSONEncoder().encode(micIndicator), forKey: Key.micIndicator) }
+    }
     @Published var launchActions: [LaunchAction] {
         didSet { defaults.set(try? JSONEncoder().encode(launchActions), forKey: Key.launchActions) }
     }
@@ -76,6 +80,8 @@ final class AppSettings: ObservableObject {
             .flatMap { try? JSONDecoder().decode([LayerLighting?].self, from: $0) } ?? []
         layerLightingEnabled = defaults.object(forKey: Key.layerLightingEnabled) as? Bool ?? true
         lightsOffWhileDisplaysSleep = defaults.object(forKey: Key.lightsOffWhileDisplaysSleep) as? Bool ?? true
+        micIndicator = defaults.data(forKey: Key.micIndicator)
+            .flatMap { try? JSONDecoder().decode(MicIndicator.self, from: $0) } ?? MicIndicator()
         launchActions = defaults.data(forKey: Key.launchActions)
             .flatMap { try? JSONDecoder().decode([LaunchAction].self, from: $0) } ?? []
     }

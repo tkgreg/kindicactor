@@ -20,7 +20,29 @@ struct LayerLighting: Codable, Equatable {
     var saturation: UInt8
 }
 
+/// A key that lights up while an app records from a microphone. It shows only while the
+/// effect is Per-key RGB, the one mode with a colour for each key.
+struct MicIndicator: Codable, Equatable {
+    var enabled = false
+    /// LED number: 0 is Esc and 1...12 are F1...F12 (on the V6 their LEDs come first).
+    var led: UInt8 = 0
+    var hue: UInt8 = 0
+    var saturation: UInt8 = 255
+
+    static let keys: [(led: UInt8, name: String)] = [(0, "Esc")] + (1...12).map { (UInt8($0), "F\($0)") }
+}
+
+/// One key's colour in Per-key RGB mode. Unlike the effect's colour it has its own value
+/// (brightness), which the keyboard's brightness setting then scales.
+struct KeyColor: Equatable {
+    var hue: UInt8
+    var saturation: UInt8
+    var value: UInt8
+}
+
 enum LightingEffect {
+    static let perKeyRGB: UInt8 = 23
+
     /// Effect IDs of the V6 Ultra 8K firmware (`enum rgb_effects` in Keychron's ZMK);
     /// 0 turns the lights off.
     static let names = [
@@ -49,4 +71,15 @@ enum LightingCommand {
     static let effect: UInt8 = 2
     static let speed: UInt8 = 3
     static let color: UInt8 = 4
+}
+
+/// Keychron's per-key RGB commands, as Keychron Launcher sends them: `[0xA8, command, data...]`.
+/// Replies echo the first two bytes and carry data from byte 3. Launcher saves after each
+/// change (`0xA8 0x02`); KIndicator never does, so its key colours stay in the keyboard's memory.
+enum PerKeyCommand {
+    static let group: UInt8 = 0xA8
+    /// `[first LED, count]`, replied with count × (hue, saturation, value); up to 9 LEDs.
+    static let getColors: UInt8 = 0x09
+    /// `[first LED, count, hue, saturation, value, ...]`; up to 9 LEDs.
+    static let setColors: UInt8 = 0x0A
 }

@@ -34,6 +34,7 @@ struct SettingsView: View {
     @ObservedObject var monitor: KeyboardMonitor
     @ObservedObject var settings: AppSettings
     @ObservedObject var lighting: LightingController
+    @ObservedObject var microphone: MicrophoneMonitor
     let updates: UpdateChecker
     @AppStorage(SettingsView.tabKey) private var tab = SettingsTab.layers
     @State private var launchAtLogin = LoginItem.isEnabled
@@ -217,6 +218,44 @@ struct SettingsView: View {
             }
             SettingsNote(text: "Layers set to Keep saved show the lighting saved on the keyboard; change it from the menu bar › Lighting. Needs the cable or 2.4 GHz.")
         }
+        SettingsGroup(title: "Mic Indicator") {
+            SettingsRow(title: "Light a Key While Mic Is in Use",
+                        description: "While any app records from a microphone, the key shows this colour, without saving it on the keyboard.") {
+                Toggle("Light a Key While Mic Is in Use", isOn: $settings.micIndicator.enabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+            SettingsRow(title: "Key and Color") {
+                HStack(spacing: 6) {
+                    Picker("Key", selection: $settings.micIndicator.led) {
+                        ForEach(MicIndicator.keys.indices, id: \.self) { index in
+                            Text(MicIndicator.keys[index].name).tag(MicIndicator.keys[index].led)
+                        }
+                    }
+                    .fixedSize()
+                    ColorPicker("Color", selection: micColorBinding, supportsOpacity: false)
+                    HexColorField(hue: settings.micIndicator.hue, saturation: settings.micIndicator.saturation) { hue, saturation in
+                        settings.micIndicator.hue = hue
+                        settings.micIndicator.saturation = saturation
+                    }
+                }
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
+                .disabled(!settings.micIndicator.enabled)
+            }
+            SettingsNote(text: micStatus)
+        }
+    }
+
+    /// Who's using the microphone, and why the key can't light up, if it can't.
+    private var micStatus: String {
+        let apps = microphone.recordingApps
+        let now = apps.isEmpty ? "No app is using a microphone." : "In use by \(apps.joined(separator: ", "))."
+        var needs = "The key lights up only with the Per-key RGB effect"
+        if let effect = lighting.saved?.effect, effect != LightingEffect.perKeyRGB {
+            needs += "; the keyboard is on \(LightingEffect.name(effect)) (menu bar › Lighting › Effect)"
+        }
+        return "\(now) \(needs). Needs the cable or 2.4 GHz."
     }
 
     @ViewBuilder private var connectionPage: some View {
@@ -284,6 +323,22 @@ struct SettingsView: View {
                 lighting.hue = UInt8((rgb.hueComponent * 255).rounded())
                 lighting.saturation = UInt8((rgb.saturationComponent * 255).rounded())
                 settings.setLighting(lighting, for: layer)
+            }
+        )
+    }
+
+    private var micColorBinding: Binding<Color> {
+        Binding(
+            get: {
+                Color(hue: Double(settings.micIndicator.hue) / 255,
+                      saturation: Double(settings.micIndicator.saturation) / 255, brightness: 1)
+            },
+            set: { color in
+                guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return }
+                var indicator = settings.micIndicator
+                indicator.hue = UInt8((rgb.hueComponent * 255).rounded())
+                indicator.saturation = UInt8((rgb.saturationComponent * 255).rounded())
+                settings.micIndicator = indicator
             }
         )
     }
