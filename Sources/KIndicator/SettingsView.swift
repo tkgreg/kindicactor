@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, layers, launchActions, connection
+    case general, layers, launchActions, connection, about
 
     var id: String { rawValue }
 
@@ -11,6 +11,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .layers: "Layers"
         case .launchActions: "Launch Actions"
         case .connection: "Connection"
+        case .about: "About"
         }
     }
 
@@ -20,6 +21,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .layers: "square.3.layers.3d"
         case .launchActions: "command"
         case .connection: "cable.connector"
+        case .about: "info.circle"
         }
     }
 }
@@ -32,6 +34,7 @@ struct SettingsView: View {
     @ObservedObject var monitor: KeyboardMonitor
     @ObservedObject var settings: AppSettings
     @ObservedObject var lighting: LightingController
+    let updates: UpdateChecker
     @AppStorage(SettingsView.tabKey) private var tab = SettingsTab.layers
     @State private var launchAtLogin = LoginItem.isEnabled
     @State private var loginNeedsApproval = LoginItem.needsApproval
@@ -100,6 +103,7 @@ struct SettingsView: View {
         case .layers: layersPage
         case .launchActions: LaunchActionsSettings(settings: settings)
         case .connection: connectionPage
+        case .about: AboutPage(updates: updates)
         }
     }
 

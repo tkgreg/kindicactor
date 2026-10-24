@@ -40,6 +40,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/$EXECUTABLE" "$APP/Contents/MacOS/$EXECUTABLE"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+cp LICENSE "$APP/Contents/Resources/LICENSE"
 
 echo "==> Signing with $IDENTITY"
 codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"

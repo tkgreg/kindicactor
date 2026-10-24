@@ -17,7 +17,7 @@ struct KIndicatorApp: App {
 
         Window("KIndicator", id: SettingsView.windowID) {
             SettingsView(monitor: appDelegate.monitor, settings: appDelegate.settings,
-                         lighting: appDelegate.lighting)
+                         lighting: appDelegate.lighting, updates: appDelegate.updates)
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
@@ -30,6 +30,7 @@ struct KIndicatorApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let settings = AppSettings()
     let monitor = KeyboardMonitor()
+    let updates = UpdateChecker()
     lazy var lighting = LightingController(monitor: monitor, settings: settings)
     lazy var launchActions = LaunchActionRunner(settings: settings)
     private var subscriptions: Set<AnyCancellable> = []
@@ -95,6 +96,7 @@ struct MenuContent: View {
                 Text(option.title).tag(option)
             }
         }
+        Button("About KIndicator") { openSettings(.about) }
         Button("Settings…") { openSettings() }
             .keyboardShortcut(",")
         Divider()
