@@ -239,8 +239,13 @@ final class LightingController: ObservableObject {
     }
 
     private func read() async -> Lighting? {
-        guard let effect = await get(LightingCommand.effect),
-              let brightness = await get(LightingCommand.brightness),
+        guard let effect = await get(LightingCommand.effect) else { return nil }
+        // Right after reconnecting over 2.4 GHz a reply can be garbage (effect 63 was seen).
+        guard LightingEffect.ids.contains(effect[0]) else {
+            log.error("read ignored: unknown effect \(effect[0])")
+            return nil
+        }
+        guard let brightness = await get(LightingCommand.brightness),
               let speed = await get(LightingCommand.speed),
               let color = await get(LightingCommand.color)
         else { return nil }
