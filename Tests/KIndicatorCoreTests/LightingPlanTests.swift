@@ -1,0 +1,91 @@
+import Testing
+@testable import KIndicatorCore
+
+struct LightingPlanTests {
+    /// The user's saved lighting in the logs: Per-key RGB, brightness 80, speed 63.
+    let perKey = Lighting(effect: 23, brightness: 80, speed: 63, hue: 21, saturation: 255)
+    let greenSolid = LayerLighting(effect: 1, hue: 85, saturation: 255)
+
+    @Test func layerLightingSendsColourThenEffect() {
+        // Logged as "write Solid Color … over Per-key RGB …: 0455ff 0201".
+        let target = LightingPlan.overlay(greenSolid, on: perKey)
+        #expect(LightingPlan.requests(from: perKey, to: target, keptEffect: 23)
+            == [.setColor(hue: 85, saturation: 255), .setEffect(1)])
+        // And back: "0415ff 0217".
+        #expect(LightingPlan.requests(from: target, to: perKey, keptEffect: 23)
+            == [.setColor(hue: 21, saturation: 255), .setEffect(23)])
+    }
+
+    @Test func nothingToSendWhenEqual() {
+        #expect(LightingPlan.requests(from: perKey, to: perKey, keptEffect: 23).isEmpty)
+    }
+
+    @Test func turningLightsOnSendsEffectFirst() {
+        var off = perKey
+        off.effect = 0
+        off.hue = 0
+        let requests = LightingPlan.requests(from: off, to: perKey, keptEffect: 23)
+        #expect(requests == [.setEffect(23), .setColor(hue: 21, saturation: 255)])
+    }
+
+    @Test func turningLightsOffPutsKeptEffectBack() {
+        // Off from a layer's Solid Color: the light key should bring back Per-key RGB.
+        let solid = LightingPlan.overlay(greenSolid, on: perKey)
+        var off = solid
+        off.effect = 0
+        #expect(LightingPlan.requests(from: solid, to: off, keptEffect: 23) == [.setEffect(23), .setEffect(0)])
+        // Off from the kept effect itself: just off ("0200" in the logs).
+        var perKeyOff = perKey
+        perKeyOff.effect = 0
+        #expect(LightingPlan.requests(from: perKey, to: perKeyOff, keptEffect: 23) == [.setEffect(0)])
+    }
+
+    @Test func lightsOffKeepsShownColour() {
+        #expect(LightingPlan.lightsOff(applied: greenSolid, saved: perKey) == LayerLighting(effect: 0, hue: 85, saturation: 255))
+        #expect(LightingPlan.lightsOff(applied: nil, saved: perKey) == LayerLighting(effect: 0, hue: 21, saturation: 255))
+        #expect(LightingPlan.target(layerLighting: greenSolid, lightsOff: false, applied: nil, saved: perKey) == greenSolid)
+        #expect(LightingPlan.target(layerLighting: greenSolid, lightsOff: true, applied: nil, saved: perKey)?.effect == 0)
+        #expect(LightingPlan.target(layerLighting: nil, lightsOff: false, applied: greenSolid, saved: perKey) == nil)
+    }
+
+    @Test func restoreUndoesTheLayersLighting() {
+        let shown = LightingPlan.overlay(greenSolid, on: perKey)
+        let restore = LightingPlan.restore(saved: perKey, applied: greenSolid, keyboardShows: shown)
+        #expect(restore.lighting == perKey)
+        #expect(restore.current == shown)
+        #expect(!restore.needsSave)
+    }
+
+    @Test func restoreKeepsChangesMadeOnTheKeyboard() {
+        // Fn + light keys while the layer's lighting was on: brighter, and another effect.
+        var changed = LightingPlan.overlay(greenSolid, on: perKey)
+        changed.brightness = 160
+        changed.effect = 2
+        let restore = LightingPlan.restore(saved: perKey, applied: greenSolid, keyboardShows: changed)
+        #expect(restore.lighting.brightness == 160)
+        #expect(restore.lighting.effect == 2)
+        #expect(restore.lighting.hue == 21)
+        #expect(restore.needsSave)
+    }
+
+    @Test func restoreIgnoresBrightnessRounding() {
+        var rounded = LightingPlan.overlay(greenSolid, on: perKey)
+        rounded.brightness = 78
+        #expect(LightingPlan.restore(saved: perKey, applied: greenSolid, keyboardShows: rounded).lighting.brightness == 80)
+    }
+
+    @Test func restoreAfterKeyboardRestartedNeedsNoSave() {
+        // Off for the displays' sleep, and the keyboard restarted: it shows the saved lighting.
+        let off = LightingPlan.lightsOff(applied: nil, saved: perKey)
+        let restore = LightingPlan.restore(saved: perKey, applied: off, keyboardShows: perKey)
+        #expect(restore.lighting == perKey)
+        #expect(!restore.needsSave)
+    }
+
+    @Test func restoreWithoutReadingTheKeyboard() {
+        let restore = LightingPlan.restore(saved: perKey, applied: greenSolid, keyboardShows: nil)
+        #expect(restore.lighting == perKey)
+        #expect(restore.current == LightingPlan.overlay(greenSolid, on: perKey))
+        #expect(!restore.needsSave)
+    }
+}

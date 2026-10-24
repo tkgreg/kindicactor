@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import KIndicatorCore
 import SwiftUI
 
 @main
@@ -18,7 +19,7 @@ struct KIndicatorApp: App {
         Window("KIndicator", id: SettingsView.windowID) {
             SettingsView(monitor: appDelegate.monitor, settings: appDelegate.settings,
                          lighting: appDelegate.lighting, microphone: appDelegate.microphone,
-                         updates: appDelegate.updates)
+                         maps: appDelegate.maps, updates: appDelegate.updates)
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
@@ -33,7 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let monitor = KeyboardMonitor()
     let updates = UpdateChecker()
     let microphone = MicrophoneMonitor()
-    lazy var lighting = LightingController(monitor: monitor, settings: settings, microphone: microphone)
+    lazy var maps = KeyboardMaps(monitor: monitor)
+    lazy var lighting = LightingController(monitor: monitor, settings: settings, microphone: microphone, maps: maps)
     lazy var launchActions = LaunchActionRunner(settings: settings)
     private var subscriptions: Set<AnyCancellable> = []
 
@@ -46,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &subscriptions)
         monitor.start()
         microphone.start()
+        maps.start()
         lighting.start()
         launchActions.start()
         LoginItem.enableOnFirstLaunch()

@@ -1,5 +1,6 @@
 import Foundation
 import IOKit.hid
+import KIndicatorCore
 import OSLog
 
 private let log = Logger(subsystem: "local.kindicator", category: "monitor")
@@ -61,6 +62,8 @@ final class KeyboardMonitor: ObservableObject {
     @Published private(set) var deviceName: String?
     /// The keyboard's model; over 2.4 GHz asked from the dongle, which knows what's paired.
     @Published private(set) var model: String?
+    /// The keyboard's USB product ID, also through the dongle; picks the bundled layout.
+    @Published private(set) var productID: Int?
 
     var isConnected: Bool {
         if case .connected = status { true } else { false }
@@ -70,14 +73,6 @@ final class KeyboardMonitor: ObservableObject {
         didSet { refreshStatus() }
     }
     var pollInterval: Duration = .milliseconds(250)
-
-    private enum Command {
-        static let getLayerCount: UInt8 = 0x11
-        static let getFirmwareVersion: UInt8 = 0xA1
-        static let getActiveLayer: UInt8 = 0xA3
-        /// Answered by the dongle: up to 3 paired devices as (vid, pid, active), little-endian.
-        static let getReceiverState: UInt8 = 0xB2
-    }
 
     private static let vendorID = 0x3434
     private static let rawUsagePage = 0xFF60
@@ -94,6 +89,7 @@ final class KeyboardMonitor: ObservableObject {
         var lastReply: ContinuousClock.Instant?
         /// The keyboard's model: its own for the cable, the paired keyboard's for the dongle.
         var model: String?
+        var productID: Int?
 
         init(device: IOHIDDevice, kind: ConnectionKind, name: String) {
             self.device = device
@@ -118,6 +114,9 @@ final class KeyboardMonitor: ObservableObject {
     private var bluetoothKeyboards: [ObjectIdentifier: (name: String, model: String)] = [:]
     private var activeEndpoint: Endpoint?
     private var pendingRequests: [PendingRequest] = []
+    /// The request being exchanged; the next one waits for it, since the keyboard drops a
+    /// report that arrives while it's still handling another.
+    private var lastRequest: Task<Void, Never>?
     private var lastPollAt: ContinuousClock.Instant?
     private var otherApp: String?
     private var pollTask: Task<Void, Never>?
@@ -204,6 +203,7 @@ final class KeyboardMonitor: ObservableObject {
         let endpoint = Endpoint(device: device, kind: kind, name: name)
         if kind != .dongle {
             endpoint.model = Self.model(of: device, named: name)
+            endpoint.productID = device.intProperty(kIOHIDProductIDKey)
         }
         endpoints[id] = endpoint
 
@@ -220,7 +220,7 @@ final class KeyboardMonitor: ObservableObject {
                 }
             }, context)
 
-        send(Command.getActiveLayer, to: endpoint)
+        send(.activeLayer, to: endpoint)
     }
 
     private func deviceRemoved(_ device: IOHIDDevice) {
@@ -242,19 +242,28 @@ final class KeyboardMonitor: ObservableObject {
         // talks to the keyboard: Launcher would get our replies and lose its own.
         if otherApp == nil, pendingRequests.isEmpty {
             for endpoint in endpoints.values where preference.allows(endpoint.kind) {
-                send(Command.getActiveLayer, to: endpoint)
+                send(.activeLayer, to: endpoint)
             }
             lastPollAt = .now
         }
         refreshStatus()
     }
 
-    /// Sends `bytes` to the connected keyboard and waits for the reply, which echoes the
-    /// first `headerLength` bytes of the request; resends when it gets lost. Nil when not
-    /// connected or never answered.
-    func request(_ bytes: [UInt8], headerLength: Int = 3, attempts: Int = 3,
+    /// Sends `request` to the connected keyboard once the previous request is done, and waits
+    /// for the reply; resends when it gets lost. Nil when not connected or never answered.
+    func request(_ request: KeyboardRequest, attempts: Int = 3,
                  timeout: Duration = .milliseconds(200)) async -> [UInt8]? {
-        let hex = bytes.prefix(5).map { String(format: "%02x", $0) }.joined(separator: " ")
+        let previous = lastRequest
+        let exchange = Task { () -> [UInt8]? in
+            await previous?.value
+            return await self.perform(request, attempts: attempts, timeout: timeout)
+        }
+        lastRequest = Task { _ = await exchange.value }
+        return await exchange.value
+    }
+
+    private func perform(_ request: KeyboardRequest, attempts: Int, timeout: Duration) async -> [UInt8]? {
+        let hex = request.bytes.prefix(5).map { String(format: "%02x", $0) }.joined(separator: " ")
         for attempt in 1...attempts {
             // Give a layer poll that just went out time to be answered.
             while let lastPollAt, ContinuousClock.now - lastPollAt < .milliseconds(15) {
@@ -264,7 +273,7 @@ final class KeyboardMonitor: ObservableObject {
                 log.error("request \(hex, privacy: .public): no keyboard")
                 return nil
             }
-            if let reply = await exchange(bytes, headerLength: headerLength, timeout: timeout, with: endpoint) {
+            if let reply = await exchange(request, timeout: timeout, with: endpoint) {
                 return reply
             }
             log.error("request \(hex, privacy: .public): no reply (attempt \(attempt) of \(attempts))")
@@ -272,13 +281,11 @@ final class KeyboardMonitor: ObservableObject {
         return nil
     }
 
-    private func exchange(_ bytes: [UInt8], headerLength: Int, timeout: Duration,
-                          with endpoint: Endpoint) async -> [UInt8]? {
+    private func exchange(_ request: KeyboardRequest, timeout: Duration, with endpoint: Endpoint) async -> [UInt8]? {
         let id = UUID()
         return await withCheckedContinuation { continuation in
-            pendingRequests.append(PendingRequest(id: id, header: Array(bytes.prefix(headerLength)),
-                                                  continuation: continuation))
-            send(bytes, to: endpoint)
+            pendingRequests.append(PendingRequest(id: id, header: request.replyHeader, continuation: continuation))
+            send(request.bytes, to: endpoint)
             Task {
                 try? await Task.sleep(for: timeout)
                 finishRequest(id, with: nil)
@@ -297,8 +304,8 @@ final class KeyboardMonitor: ObservableObject {
     }
 
     /// Sends without waiting for the reply; for when the app is about to quit.
-    func sendNow(_ bytes: [UInt8]) {
-        if let activeEndpoint { send(bytes, to: activeEndpoint) }
+    func sendNow(_ request: KeyboardRequest) {
+        if let activeEndpoint { send(request.bytes, to: activeEndpoint) }
     }
 
     /// False when the request was already answered.
@@ -309,8 +316,8 @@ final class KeyboardMonitor: ObservableObject {
         return true
     }
 
-    private func send(_ command: UInt8, to endpoint: Endpoint) {
-        send([command], to: endpoint)
+    private func send(_ request: KeyboardRequest, to endpoint: Endpoint) {
+        send(request.bytes, to: endpoint)
     }
 
     private func send(_ bytes: [UInt8], to endpoint: Endpoint) {
@@ -331,39 +338,32 @@ final class KeyboardMonitor: ObservableObject {
             finishRequest(pending.id, with: bytes)
         }
 
-        switch bytes[0] {
-        case Command.getActiveLayer where bytes[1] < 32:
+        if let layer = KeyboardReply.activeLayer(bytes) {
             let wasSilent = !isFresh(endpoint)
-            if endpoint.layer != Int(bytes[1]) {
-                log.notice("layer \(bytes[1]) via \(endpoint.kind.rawValue, privacy: .public)")
+            if endpoint.layer != layer {
+                log.notice("layer \(layer) via \(endpoint.kind.rawValue, privacy: .public)")
             }
-            endpoint.layer = Int(bytes[1])
+            endpoint.layer = layer
             endpoint.lastReply = .now
             // While paused this is a reply to the other app's own poll; send nothing back.
             if wasSilent && otherApp == nil {
-                send(Command.getLayerCount, to: endpoint)
-                send(Command.getFirmwareVersion, to: endpoint)
+                send(.layerCount, to: endpoint)
+                send(.firmwareVersion, to: endpoint)
                 if endpoint.kind == .dongle {
-                    send(Command.getReceiverState, to: endpoint)
+                    send(.receiverState, to: endpoint)
                 }
             }
-        case Command.getLayerCount where (1...32).contains(bytes[1]):
-            layerCount = Int(bytes[1])
-        case Command.getFirmwareVersion:
-            let text = bytes.dropFirst().prefix { $0 != 0 }
-            firmware = String(decoding: text, as: UTF8.self)
-        case Command.getReceiverState where endpoint.kind == .dongle && bytes.count >= 17:
-            // Three slots of 5 bytes from offset 2: vendor ID, product ID, active flag.
-            for offset in stride(from: 2, to: 17, by: 5) where bytes[offset + 4] != 0 {
-                let vendorID = Int(bytes[offset]) | Int(bytes[offset + 1]) << 8
-                let productID = Int(bytes[offset + 2]) | Int(bytes[offset + 3]) << 8
-                if vendorID == Self.vendorID {
-                    endpoint.model = KeyboardModel.name(productID: productID)
-                    log.notice("paired keyboard: \(endpoint.model ?? "-", privacy: .public)")
-                    break
-                }
+        } else if let count = KeyboardReply.layerCount(bytes) {
+            layerCount = count
+        } else if let version = KeyboardReply.firmwareVersion(bytes) {
+            firmware = version
+        } else if endpoint.kind == .dongle, bytes.first == 0xB2 {
+            if let paired = KeyboardReply.pairedDevices(bytes).first(where: { $0.vendorID == Self.vendorID }) {
+                endpoint.model = KeyboardModel.name(productID: paired.productID)
+                endpoint.productID = paired.productID
+                log.notice("paired keyboard: \(endpoint.model ?? "-", privacy: .public)")
             }
-        default:
+        } else {
             return
         }
         refreshStatus()
@@ -417,24 +417,29 @@ final class KeyboardMonitor: ObservableObject {
             setIfChanged(\.layer, responding?.layer)
             setIfChanged(\.deviceName, (responding ?? allowed.first)?.name)
             setIfChanged(\.model, (responding ?? allowed.first)?.model)
+            setIfChanged(\.productID, (responding ?? allowed.first)?.productID)
         } else if let responding {
             newStatus = .connected(responding.kind)
             setIfChanged(\.layer, responding.layer)
             setIfChanged(\.deviceName, responding.name)
             setIfChanged(\.model, responding.model)
+            setIfChanged(\.productID, responding.productID)
         } else {
             if let keyboard = bluetoothKeyboards.values.first, preference.allows(.bluetooth) {
                 newStatus = .bluetoothOnly
                 setIfChanged(\.deviceName, keyboard.name)
                 setIfChanged(\.model, keyboard.model)
+                setIfChanged(\.productID, nil)
             } else if let endpoint = allowed.first {
                 newStatus = .noReply(endpoint.kind)
                 setIfChanged(\.deviceName, endpoint.name)
                 setIfChanged(\.model, endpoint.model)
+                setIfChanged(\.productID, endpoint.productID)
             } else {
                 newStatus = .searching
                 setIfChanged(\.deviceName, nil)
                 setIfChanged(\.model, nil)
+                setIfChanged(\.productID, nil)
             }
             setIfChanged(\.layer, nil)
         }

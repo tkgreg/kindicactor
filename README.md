@@ -24,7 +24,8 @@ KIndicator reads the active layer from the keyboard and shows it in the menu bar
   lights go off when the Mac's display sleeps and come back when it wakes. Nothing
   is saved on the keyboard.
 - **Mic indicator.** While any app records from a microphone, a key of your choice
-  (Esc or F1–F12) lights up in your colour, and gets its own colour back afterwards.
+  lights up in your colour, and gets its own colour back afterwards. Pick the key on a
+  drawing of your keyboard that shows what each key does on the active layer.
   Works with the Per-key RGB effect. Nothing is saved on the keyboard, and it needs
   no microphone permission.
 - **Lighting from the menu.** Switch the keyboard's effect (Breathing, Per-key RGB,
@@ -90,7 +91,13 @@ cable or Bluetooth.
 ```bash
 ./build.sh --install     # build, sign with your Apple Development identity, install and launch
 ./release.sh             # universal build, Developer ID signing, notarized DMG in dist/
+swift test               # tests of KIndicatorCore
 ```
+
+`KIndicatorCore` holds the app's logic as pure functions, Foundation only: the keyboard
+protocol, the lighting and mic-indicator decisions, layouts and keymaps. The `KIndicator`
+app does the I/O (HID, Core Audio, settings) and the UI, and carries out what the core
+decides.
 
 `release.sh` needs a *Developer ID Application* certificate and notarization
 credentials stored with `xcrun notarytool store-credentials kindicator-notary`.
@@ -109,6 +116,9 @@ Keychron's ZMK firmware exposes the same raw HID channel Keychron Launcher uses
 - `0xA8 0x09` / `0xA8 0x0A` get and set the colours of up to 9 keys in Per-key RGB
   mode, as Keychron Launcher does. Launcher then saves with `0xA8 0x02`; KIndicator
   never does, so the mic indicator's colour stays in the keyboard's memory.
+- VIA's `0x12` reads the keymap, and `0xA8 0x06` the LED behind each key, for the
+  keyboard drawing. Its layout comes from Keychron Launcher's definitions, bundled
+  for the V6 Ultra 8K ANSI, ISO and JIS (`Tools/make-layouts.swift` regenerates them).
 - `0xB2`, answered by the 2.4 GHz dongle, lists the paired keyboard's vendor and
   product ID, which gives the model name.
 - The keyboard answers every app that has the channel open and drops a request

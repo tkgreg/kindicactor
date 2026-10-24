@@ -1,4 +1,5 @@
 import Foundation
+import KIndicatorCore
 
 enum MenuBarStyle: String, CaseIterable, Identifiable {
     case icon, iconAndName, name

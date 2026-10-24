@@ -1,29 +1,23 @@
 import AppKit
 import Combine
+import KIndicatorCore
 import OSLog
 
 private let log = Logger(subsystem: "local.kindicator", category: "lighting")
 
-/// Reads and changes the keyboard's RGB lighting, and switches it per layer.
+/// Reads and changes the keyboard's RGB lighting: per layer, off while the displays sleep,
+/// and the mic indicator's key. What to send is decided by `LightingPlan` and
+/// `MicIndicatorPlan`; this class reads the keyboard, sends the requests and keeps the state.
 ///
-/// `saved` is the lighting stored on the keyboard. A layer's own lighting is put on top
-/// without saving, and `saved` comes back on layers set to Keep. While the Mac's displays
-/// sleep, Off is put on top the same way.
-///
-/// Only values that differ from what the keyboard shows are sent: setting the effect is
-/// slow (60–100 ms) and resending brightness loses a step to rounding each time.
-///
-/// While its lights are off the keyboard reports the effect as Off, ignores colour and
-/// brightness, and keeps the effect its light key turns back on.
-///
-/// The mic indicator changes one key's colour, also without saving, and only while the
-/// keyboard shows Per-key RGB; the key gets its own colour back afterwards.
+/// `saved` is the lighting stored on the keyboard. A layer's own lighting, or Off while the
+/// Mac's displays sleep, is put on top without saving, and `saved` comes back on layers set
+/// to Keep. The mic indicator changes one key's colour, also without saving.
 @MainActor
 final class LightingController: ObservableObject {
     /// The lighting stored on the keyboard; nil until it has been read.
     @Published private(set) var saved: Lighting? {
         didSet {
-            if let effect = saved?.effect, effect != 0, effect != keptEffect { keptEffect = effect }
+            if let effect = saved?.effect, effect != LightingEffect.off, effect != keptEffect { keptEffect = effect }
         }
     }
 
@@ -37,8 +31,8 @@ final class LightingController: ObservableObject {
     private let monitor: KeyboardMonitor
     private let settings: AppSettings
     private let microphone: MicrophoneMonitor
-    /// The key showing the mic indicator: its LED, its own colour and the colour it shows.
-    private var indicatorShown: (led: UInt8, own: KeyColor, shown: KeyColor)?
+    private let maps: KeyboardMaps
+    private var indicatorShown: ShownIndicator?
     /// The keyboard may have lost the indicator's colour (it was disconnected, or another
     /// app had it open), so it's sent again.
     private var indicatorStale = false
@@ -61,10 +55,11 @@ final class LightingController: ObservableObject {
     private var refreshTask: Task<Void, Never>?
     private var subscriptions: Set<AnyCancellable> = []
 
-    init(monitor: KeyboardMonitor, settings: AppSettings, microphone: MicrophoneMonitor) {
+    init(monitor: KeyboardMonitor, settings: AppSettings, microphone: MicrophoneMonitor, maps: KeyboardMaps) {
         self.monitor = monitor
         self.settings = settings
         self.microphone = microphone
+        self.maps = maps
         keptEffect = (UserDefaults.standard.object(forKey: Self.keptEffectKey) as? Int).flatMap(UInt8.init(exactly:))
     }
 
@@ -89,6 +84,9 @@ final class LightingController: ObservableObject {
             .sink { [weak self] _ in self?.scheduleSync() }
             .store(in: &subscriptions)
         microphone.$recordingApps.map(\.isEmpty).removeDuplicates()
+            .sink { [weak self] _ in self?.scheduleSync() }
+            .store(in: &subscriptions)
+        maps.$ledMap.removeDuplicates()
             .sink { [weak self] _ in self?.scheduleSync() }
             .store(in: &subscriptions)
 
@@ -134,14 +132,14 @@ final class LightingController: ObservableObject {
                 return
             }
             // Saving stores whatever the keyboard shows, so a layer's own lighting makes way first.
-            guard await self.write(lighting, over: self.shown(before)) else {
+            guard await self.write(lighting, over: LightingPlan.shown(saved: before, applied: self.applied)) else {
                 log.error("change failed: keyboard didn't confirm")
                 return
             }
             await self.save()
             log.notice("saved \(LightingEffect.name(lighting.effect), privacy: .public)")
             if let applied = self.applied {
-                await self.write(self.overlay(applied, on: lighting), over: lighting)
+                await self.write(LightingPlan.overlay(applied, on: lighting), over: lighting)
             }
         }
     }
@@ -149,10 +147,11 @@ final class LightingController: ObservableObject {
     /// Puts the saved lighting back before the app quits, without waiting for replies.
     func restoreBeforeQuit() {
         if let indicatorShown {
-            monitor.sendNow(Self.setKeyColorCommand(indicatorShown.led, indicatorShown.own))
+            monitor.sendNow(.setKeyColors(first: indicatorShown.led, [indicatorShown.own]))
         }
         guard let applied, let saved else { return }
-        commands(for: saved, over: overlay(applied, on: saved)).forEach(monitor.sendNow)
+        LightingPlan.requests(from: LightingPlan.overlay(applied, on: saved), to: saved, keptEffect: keptEffect)
+            .forEach(monitor.sendNow)
     }
 
     private func scheduleSync() {
@@ -170,7 +169,9 @@ final class LightingController: ObservableObject {
     private func syncLayerLighting() async {
         guard monitor.isConnected, let layer = monitor.layer else { return }
         let lightsOff = displaysAsleep && settings.lightsOffWhileDisplaysSleep
-        let target = lightsOff ? lightsOffLighting : settings.layerLightingEnabled ? settings.lighting(for: layer) : nil
+        let target = LightingPlan.target(
+            layerLighting: settings.layerLightingEnabled ? settings.lighting(for: layer) : nil,
+            lightsOff: lightsOff, applied: applied, saved: saved)
         guard target != applied else { return }
 
         // The keyboard may have restarted while its lights were off and show the saved
@@ -187,7 +188,8 @@ final class LightingController: ObservableObject {
             // and colour sent before turning them back on is ignored: read them now.
             if applied == nil { await refreshSaved() }
             guard let saved else { return }
-            guard await write(overlay(target, on: saved), over: shown(saved)) else { return }
+            guard await write(LightingPlan.overlay(target, on: saved),
+                              over: LightingPlan.shown(saved: saved, applied: applied)) else { return }
             applied = target
             lightsOffShown = lightsOff
             log.notice("layer \(layer) lighting: \(lightsOff ? "off while displays sleep" : LightingEffect.name(target.effect), privacy: .public)")
@@ -197,95 +199,56 @@ final class LightingController: ObservableObject {
         }
     }
 
-    /// Off, in the colour the keyboard shows, so only the effect changes.
-    private var lightsOffLighting: LayerLighting {
-        let color = applied.map { ($0.hue, $0.saturation) } ?? saved.map { ($0.hue, $0.saturation) } ?? (0, 255)
-        return LayerLighting(effect: 0, hue: color.0, saturation: color.1)
-    }
-
     private func restoreSaved() async {
-        guard let applied, let before = saved else {
+        guard let applied, let saved else {
             self.applied = nil
             lightsOffShown = false
             return
         }
-        var lighting = before
-        var current = overlay(applied, on: lighting)
-        // Light keys pressed while the layer's lighting was on (Fn + light keys) changed the
-        // keyboard; keep those changes and save them instead of undoing them.
-        if let now = await read() {
-            log.notice("keyboard shows \(now.summary, privacy: .public)")
-            if abs(Int(now.brightness) - Int(lighting.brightness)) > 2 {
-                lighting.brightness = now.brightness
-            }
-            if now.speed != lighting.speed {
-                lighting.speed = now.speed
-            }
-            if now.effect != applied.effect {
-                lighting.effect = now.effect
-            }
-            if (now.hue, now.saturation) != (applied.hue, applied.saturation) {
-                lighting.hue = now.hue
-                lighting.saturation = now.saturation
-            }
-            current = Lighting(effect: now.effect, brightness: lighting.brightness, speed: lighting.speed,
-                               hue: now.hue, saturation: now.saturation)
-        }
-        guard await write(lighting, over: current) else { return }
-        // A keyboard that restarted shows the saved lighting again: nothing new to save.
-        if lighting != before { await save() }
-        saved = lighting
+        let now = await read()
+        if let now { log.notice("keyboard shows \(now.summary, privacy: .public)") }
+        let restore = LightingPlan.restore(saved: saved, applied: applied, keyboardShows: now)
+        guard await write(restore.lighting, over: restore.current) else { return }
+        if restore.needsSave { await save() }
+        self.saved = restore.lighting
         self.applied = nil
         lightsOffShown = false
     }
 
-    /// What the keyboard shows: the saved lighting, or a layer's lighting on top of it.
-    private func shown(_ saved: Lighting) -> Lighting {
-        applied.map { overlay($0, on: saved) } ?? saved
-    }
-
-    private func overlay(_ layer: LayerLighting, on saved: Lighting) -> Lighting {
-        Lighting(effect: layer.effect, brightness: saved.brightness, speed: saved.speed,
-                 hue: layer.hue, saturation: layer.saturation)
-    }
-
     // MARK: - Mic indicator
 
+    /// Carries out `MicIndicatorPlan`'s steps until there's nothing left to do, or the
+    /// keyboard doesn't answer (the next sync tries again).
     private func syncMicIndicator() async {
         guard monitor.isConnected else { return }
-        let indicator = settings.micIndicator
-        let perKeyShown = saved.map { shown($0).effect } == LightingEffect.perKeyRGB
-        let wanted = indicator.enabled && microphone.inUse && perKeyShown ? indicator : nil
+        let wanted = MicIndicatorPlan.wanted(
+            settings.micIndicator, micInUse: microphone.inUse,
+            shownEffect: saved.map { LightingPlan.shown(saved: $0, applied: applied).effect }, ledMap: maps.ledMap)
 
-        // Turned off, or moved to another key: the key gets its own colour back.
-        if let current = indicatorShown, wanted?.led != current.led {
-            guard await setKeyColor(current.led, current.own) else { return }
-            indicatorShown = nil
-            log.notice("mic indicator off: \(Self.keyName(current.led), privacy: .public)")
+        while true {
+            switch MicIndicatorPlan.step(shown: indicatorShown, wanted: wanted, stale: indicatorStale) {
+            case .nothing:
+                return
+            case .restore(let shown):
+                guard await setKeyColor(shown.led, shown.own) else { return }
+                indicatorShown = nil
+                log.notice("mic indicator off: LED \(shown.led)")
+            case .light(let wanted):
+                guard let own = await keyColor(wanted.led) else { return }
+                let color = MicIndicatorPlan.color(for: wanted, own: own)
+                guard await setKeyColor(wanted.led, color) else { return }
+                indicatorShown = ShownIndicator(led: wanted.led, own: own, shown: color)
+                indicatorStale = false
+                log.notice("mic indicator on: LED \(wanted.led) (own colour h\(own.hue) s\(own.saturation) v\(own.value))")
+            case .recolor(let shown, let color):
+                guard await setKeyColor(shown.led, color) else { return }
+                indicatorShown = ShownIndicator(led: shown.led, own: shown.own, shown: color)
+                indicatorStale = false
+            }
         }
-        guard let wanted else { return }
-
-        if let current = indicatorShown {
-            let color = KeyColor(hue: wanted.hue, saturation: wanted.saturation, value: current.shown.value)
-            guard color != current.shown || indicatorStale else { return }
-            guard await setKeyColor(current.led, color) else { return }
-            indicatorShown = (current.led, current.own, color)
-        } else {
-            guard let own = await keyColor(wanted.led) else { return }
-            // The key's own brightness, or full for a key that's dark.
-            let color = KeyColor(hue: wanted.hue, saturation: wanted.saturation, value: own.value == 0 ? 255 : own.value)
-            guard await setKeyColor(wanted.led, color) else { return }
-            indicatorShown = (wanted.led, own, color)
-            log.notice("mic indicator on: \(Self.keyName(wanted.led), privacy: .public) (own colour h\(own.hue) s\(own.saturation) v\(own.value))")
-        }
-        indicatorStale = false
     }
 
-    private static func keyName(_ led: UInt8) -> String {
-        MicIndicator.keys.first { $0.led == led }?.name ?? "LED \(led)"
-    }
-
-    // MARK: - Protocol
+    // MARK: - Keyboard requests
 
     private func scheduleRefresh() {
         guard applied == nil, pendingChanges == 0, monitor.isConnected else { return }
@@ -301,15 +264,15 @@ final class LightingController: ObservableObject {
     }
 
     private func read() async -> Lighting? {
-        guard let effect = await get(LightingCommand.effect) else { return nil }
+        guard let effect = await get(.effect) else { return nil }
         // Right after reconnecting over 2.4 GHz a reply can be garbage (effect 63 was seen).
         guard LightingEffect.ids.contains(effect[0]) else {
             log.error("read ignored: unknown effect \(effect[0])")
             return nil
         }
-        guard let brightness = await get(LightingCommand.brightness),
-              let speed = await get(LightingCommand.speed),
-              let color = await get(LightingCommand.color)
+        guard let brightness = await get(.brightness),
+              let speed = await get(.speed),
+              let color = await get(.color), color.count >= 2
         else { return nil }
         return Lighting(effect: effect[0], brightness: brightness[0], speed: speed[0],
                         hue: color[0], saturation: color[1])
@@ -319,75 +282,35 @@ final class LightingController: ObservableObject {
     /// one the keyboard doesn't answer.
     @discardableResult
     private func write(_ target: Lighting, over current: Lighting) async -> Bool {
-        let commands = commands(for: target, over: current)
-        // "0217 0415ff": value id and data of each set command, in order.
-        let sent = commands.map { $0.dropFirst(2).map { String(format: "%02x", $0) }.joined() }
+        let requests = LightingPlan.requests(from: current, to: target, keptEffect: keptEffect)
+        // "0217 0415ff": value id and data of each set request, in order.
+        let sent = requests.map { $0.bytes.dropFirst(2).map { String(format: "%02x", $0) }.joined() }
         log.notice("write \(target.summary, privacy: .public) over \(current.summary, privacy: .public): \(sent.joined(separator: " "), privacy: .public)")
-        for command in commands {
-            guard await monitor.request(command) != nil else { return false }
+        for request in requests {
+            guard await monitor.request(request) != nil else { return false }
         }
         return true
     }
 
-    /// The set commands that take the keyboard from `current` to `target`. The effect goes
-    /// last so the new effect starts in the new colour, except when the lights are off.
-    private func commands(for target: Lighting, over current: Lighting) -> [[UInt8]] {
-        var commands: [[UInt8]] = []
-        var effect = current.effect
-        if effect == 0, target.effect != 0 {
-            // Colour and brightness sent while off are ignored.
-            commands.append(Self.setCommand(LightingCommand.effect, [target.effect]))
-            effect = target.effect
-        } else if target.effect == 0, effect != 0, let keptEffect, keptEffect != effect {
-            // Otherwise the light key would turn back on with the layer's effect.
-            commands.append(Self.setCommand(LightingCommand.effect, [keptEffect]))
-            effect = keptEffect
-        }
-        if (target.hue, target.saturation) != (current.hue, current.saturation) {
-            commands.append(Self.setCommand(LightingCommand.color, [target.hue, target.saturation]))
-        }
-        if target.brightness != current.brightness {
-            commands.append(Self.setCommand(LightingCommand.brightness, [target.brightness]))
-        }
-        if target.speed != current.speed {
-            commands.append(Self.setCommand(LightingCommand.speed, [target.speed]))
-        }
-        if target.effect != effect {
-            commands.append(Self.setCommand(LightingCommand.effect, [target.effect]))
-        }
-        return commands
-    }
-
-    private func get(_ value: UInt8) async -> [UInt8]? {
-        let request = [LightingCommand.getValue, LightingCommand.rgbMatrixChannel, value]
-        guard let reply = await monitor.request(request), reply.count >= 5 else { return nil }
-        return Array(reply[3...])
+    private func get(_ value: KeyboardRequest.LightingValue) async -> [UInt8]? {
+        await monitor.request(.getLighting(value)).flatMap(KeyboardReply.lightingValue)
     }
 
     private func save() async {
         // In case saving also stores the key colours, the indicator's key makes way meanwhile.
         if let indicatorShown { await setKeyColor(indicatorShown.led, indicatorShown.own) }
-        _ = await monitor.request([LightingCommand.save, LightingCommand.rgbMatrixChannel], headerLength: 2)
+        _ = await monitor.request(.saveLighting)
         if let indicatorShown { await setKeyColor(indicatorShown.led, indicatorShown.shown) }
     }
 
     private func keyColor(_ led: UInt8) async -> KeyColor? {
-        let request = [PerKeyCommand.group, PerKeyCommand.getColors, led, 1]
-        guard let reply = await monitor.request(request, headerLength: 2), reply.count >= 6 else { return nil }
-        return KeyColor(hue: reply[3], saturation: reply[4], value: reply[5])
+        await monitor.request(.getKeyColors(first: led, count: 1))
+            .flatMap { KeyboardReply.keyColors($0, count: 1)?.first }
     }
 
     @discardableResult
     private func setKeyColor(_ led: UInt8, _ color: KeyColor) async -> Bool {
-        await monitor.request(Self.setKeyColorCommand(led, color), headerLength: 2) != nil
-    }
-
-    private static func setKeyColorCommand(_ led: UInt8, _ color: KeyColor) -> [UInt8] {
-        [PerKeyCommand.group, PerKeyCommand.setColors, led, 1, color.hue, color.saturation, color.value]
-    }
-
-    private static func setCommand(_ value: UInt8, _ data: [UInt8]) -> [UInt8] {
-        [LightingCommand.setValue, LightingCommand.rgbMatrixChannel, value] + data
+        await monitor.request(.setKeyColors(first: led, [color])) != nil
     }
 
     /// Runs keyboard work one piece at a time, in order.

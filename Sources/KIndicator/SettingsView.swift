@@ -1,3 +1,4 @@
+import KIndicatorCore
 import SwiftUI
 
 enum SettingsTab: String, CaseIterable, Identifiable {
@@ -35,6 +36,7 @@ struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var lighting: LightingController
     @ObservedObject var microphone: MicrophoneMonitor
+    @ObservedObject var maps: KeyboardMaps
     let updates: UpdateChecker
     @AppStorage(SettingsView.tabKey) private var tab = SettingsTab.layers
     @State private var launchAtLogin = LoginItem.isEnabled
@@ -225,14 +227,16 @@ struct SettingsView: View {
                     .labelsHidden()
                     .toggleStyle(.switch)
             }
-            SettingsRow(title: "Key and Color") {
+            SettingsRow(title: "Color") {
                 HStack(spacing: 6) {
-                    Picker("Key", selection: $settings.micIndicator.led) {
-                        ForEach(MicIndicator.keys.indices, id: \.self) { index in
-                            Text(MicIndicator.keys[index].name).tag(MicIndicator.keys[index].led)
+                    if maps.layout == nil {
+                        Picker("Key", selection: $settings.micIndicator.key) {
+                            ForEach(MicIndicator.fallbackKeys, id: \.key) { key in
+                                Text(key.name).tag(key.key)
+                            }
                         }
+                        .fixedSize()
                     }
-                    .fixedSize()
                     ColorPicker("Color", selection: micColorBinding, supportsOpacity: false)
                     HexColorField(hue: settings.micIndicator.hue, saturation: settings.micIndicator.saturation) { hue, saturation in
                         settings.micIndicator.hue = hue
@@ -243,8 +247,31 @@ struct SettingsView: View {
                 .textFieldStyle(.roundedBorder)
                 .disabled(!settings.micIndicator.enabled)
             }
+            if let layout = maps.layout {
+                micKeyPicker(layout)
+            }
             SettingsNote(text: micStatus)
         }
+    }
+
+    /// The keyboard drawn with each key's function on the active layer; click the key that
+    /// should light up. Keys without an LED (the knob) can't be picked.
+    private func micKeyPicker(_ layout: KeyboardLayout) -> some View {
+        let layer = monitor.layer ?? 0
+        let indicator = settings.micIndicator
+        return KeyboardLayoutView(
+            layout: layout,
+            selection: Binding(get: { indicator.key }, set: { if let key = $0 { settings.micIndicator.key = key } }),
+            isEnabled: { key in !key.isKnob && (maps.ledMap.map { $0.led(at: key.position) != nil } ?? true) },
+            fill: { key in key.position == indicator.key ? Self.color(hue: indicator.hue, saturation: indicator.saturation) : nil }
+        ) { key in
+            let resolved = maps.keymap?.resolved(layer: layer, at: key.position)
+            // A key the active layer leaves transparent shows the lower layer's function, dimmed.
+            Text(resolved.map { Keycode.label($0.keycode, customNames: layout.customKeycodeNames) } ?? "")
+                .opacity(resolved.map { $0.layer == layer } ?? true ? 1 : 0.5)
+        }
+        .disabled(!indicator.enabled)
+        .onAppear { maps.loadKeymap() }
     }
 
     /// Who's using the microphone, and why the key can't light up, if it can't.
@@ -255,7 +282,8 @@ struct SettingsView: View {
         if let effect = lighting.saved?.effect, effect != LightingEffect.perKeyRGB {
             needs += "; the keyboard is on \(LightingEffect.name(effect)) (menu bar › Lighting › Effect)"
         }
-        return "\(now) \(needs). Needs the cable or 2.4 GHz."
+        let pick = maps.layout == nil ? "" : " Click the key that should light up."
+        return "\(now)\(pick) \(needs). Needs the cable or 2.4 GHz."
     }
 
     @ViewBuilder private var connectionPage: some View {
@@ -329,10 +357,7 @@ struct SettingsView: View {
 
     private var micColorBinding: Binding<Color> {
         Binding(
-            get: {
-                Color(hue: Double(settings.micIndicator.hue) / 255,
-                      saturation: Double(settings.micIndicator.saturation) / 255, brightness: 1)
-            },
+            get: { Self.color(hue: settings.micIndicator.hue, saturation: settings.micIndicator.saturation) },
             set: { color in
                 guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return }
                 var indicator = settings.micIndicator
@@ -341,6 +366,10 @@ struct SettingsView: View {
                 settings.micIndicator = indicator
             }
         )
+    }
+
+    private static func color(hue: UInt8, saturation: UInt8) -> Color {
+        Color(hue: Double(hue) / 255, saturation: Double(saturation) / 255, brightness: 1)
     }
 
     private func nameBinding(for layer: Int) -> Binding<String> {
