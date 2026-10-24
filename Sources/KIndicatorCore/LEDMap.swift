@@ -23,6 +23,11 @@ package struct LEDMap: Equatable, Sendable {
         leds[position]
     }
 
+    /// LEDs are numbered from 0, so one more than the highest.
+    package var ledCount: Int {
+        leds.values.max().map { Int($0) + 1 } ?? 0
+    }
+
     package static func requests(rows: Int) -> [KeyboardRequest] {
         (0..<rows).map { KeyboardRequest.ledNumbers(row: $0) }
     }

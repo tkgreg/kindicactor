@@ -303,11 +303,6 @@ final class KeyboardMonitor: ObservableObject {
         return true
     }
 
-    /// Sends without waiting for the reply; for when the app is about to quit.
-    func sendNow(_ request: KeyboardRequest) {
-        if let activeEndpoint { send(request.bytes, to: activeEndpoint) }
-    }
-
     /// False when the request was already answered.
     @discardableResult
     private func finishRequest(_ id: UUID, with reply: [UInt8]?) -> Bool {

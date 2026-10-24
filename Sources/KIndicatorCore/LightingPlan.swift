@@ -27,6 +27,18 @@ package enum LightingPlan {
         lightsOff ? self.lightsOff(applied: applied, saved: saved) : layerLighting
     }
 
+    /// Like `target`, but while the mic indicator shows, a layer's Solid Color is drawn key by
+    /// key over the keyboard's own Per-key RGB (`fill`) instead, so the indicator's key shows
+    /// on that layer too. Other effects have no colour per key, so they hide the indicator.
+    package static func layerTarget(layerLighting: LayerLighting?, lightsOff: Bool, indicatorShows: Bool,
+                                    applied: LayerLighting?, saved: Lighting?) -> (overlay: LayerLighting?, fill: KeyColor?) {
+        if !lightsOff, indicatorShows, let layerLighting, layerLighting.effect == LightingEffect.solidColor,
+           saved?.effect == LightingEffect.perKeyRGB {
+            return (nil, KeyColor(hue: layerLighting.hue, saturation: layerLighting.saturation, value: 255))
+        }
+        return (target(layerLighting: layerLighting, lightsOff: lightsOff, applied: applied, saved: saved), nil)
+    }
+
     /// Off, in the colour the keyboard shows, so only the effect changes.
     package static func lightsOff(applied: LayerLighting?, saved: Lighting?) -> LayerLighting {
         let color = applied.map { ($0.hue, $0.saturation) } ?? saved.map { ($0.hue, $0.saturation) } ?? (0, 255)

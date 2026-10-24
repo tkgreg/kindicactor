@@ -34,8 +34,8 @@ package struct LayerLighting: Codable, Equatable, Sendable {
     }
 }
 
-/// One key's colour in Per-key RGB mode. Unlike the effect's colour it has its own value
-/// (brightness), which the keyboard's brightness setting then scales.
+/// One key's colour in Per-key RGB mode. The keyboard stores a value (brightness) per key
+/// too, but shows every key at its brightness setting (tested on the V6 Ultra 8K).
 package struct KeyColor: Equatable, Sendable {
     package var hue: UInt8
     package var saturation: UInt8
@@ -51,17 +51,23 @@ package struct KeyColor: Equatable, Sendable {
 /// A key that lights up while an app records from a microphone. It shows only while the
 /// effect is Per-key RGB, the one mode with a colour for each key.
 package struct MicIndicator: Codable, Equatable, Sendable {
+    package enum Style: String, Codable, CaseIterable, Sendable {
+        case steady, pulse
+    }
+
     package var enabled = false
     package var key = KeyPosition(row: 0, col: 0)
     package var hue: UInt8 = 0
     package var saturation: UInt8 = 255
+    package var style = Style.pulse
 
     package init(enabled: Bool = false, key: KeyPosition = KeyPosition(row: 0, col: 0),
-                 hue: UInt8 = 0, saturation: UInt8 = 255) {
+                 hue: UInt8 = 0, saturation: UInt8 = 255, style: Style = .pulse) {
         self.enabled = enabled
         self.key = key
         self.hue = hue
         self.saturation = saturation
+        self.style = style
     }
 
     /// For keyboards without a known layout: Esc and F1...F12, the start of the top row
@@ -70,7 +76,7 @@ package struct MicIndicator: Codable, Equatable, Sendable {
         [(KeyPosition(row: 0, col: 0), "Esc")] + (1...12).map { (KeyPosition(row: 0, col: $0), "F\($0)") }
 
     private enum CodingKeys: String, CodingKey {
-        case enabled, key, hue, saturation
+        case enabled, key, hue, saturation, style
         /// The first version stored an LED number; 0...12 were Esc and F1...F12.
         case led
     }
@@ -80,6 +86,7 @@ package struct MicIndicator: Codable, Equatable, Sendable {
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
         hue = try container.decodeIfPresent(UInt8.self, forKey: .hue) ?? 0
         saturation = try container.decodeIfPresent(UInt8.self, forKey: .saturation) ?? 255
+        style = try container.decodeIfPresent(Style.self, forKey: .style) ?? .pulse
         if let key = try container.decodeIfPresent(KeyPosition.self, forKey: .key) {
             self.key = key
         } else if let led = try container.decodeIfPresent(Int.self, forKey: .led) {
@@ -93,11 +100,13 @@ package struct MicIndicator: Codable, Equatable, Sendable {
         try container.encode(key, forKey: .key)
         try container.encode(hue, forKey: .hue)
         try container.encode(saturation, forKey: .saturation)
+        try container.encode(style, forKey: .style)
     }
 }
 
 package enum LightingEffect {
     package static let off: UInt8 = 0
+    package static let solidColor: UInt8 = 1
     package static let perKeyRGB: UInt8 = 23
 
     /// Effect IDs of the V6 Ultra 8K firmware (`enum rgb_effects` in Keychron's ZMK);

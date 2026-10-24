@@ -247,6 +247,16 @@ struct SettingsView: View {
                 .textFieldStyle(.roundedBorder)
                 .disabled(!settings.micIndicator.enabled)
             }
+            SettingsRow(title: "Style") {
+                Picker("Style", selection: $settings.micIndicator.style) {
+                    Text("Pulse").tag(MicIndicator.Style.pulse)
+                    Text("Steady").tag(MicIndicator.Style.steady)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .disabled(!settings.micIndicator.enabled)
+            }
             if let layout = maps.layout {
                 micKeyPicker(layout)
             }
@@ -278,7 +288,7 @@ struct SettingsView: View {
     private var micStatus: String {
         let apps = microphone.recordingApps
         let now = apps.isEmpty ? "No app is using a microphone." : "In use by \(apps.joined(separator: ", "))."
-        var needs = "The key lights up only with the Per-key RGB effect"
+        var needs = "The key lights up with the Per-key RGB effect, also on layers set to Solid Color"
         if let effect = lighting.saved?.effect, effect != LightingEffect.perKeyRGB {
             needs += "; the keyboard is on \(LightingEffect.name(effect)) (menu bar › Lighting › Effect)"
         }

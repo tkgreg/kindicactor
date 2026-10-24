@@ -54,8 +54,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         LoginItem.enableOnFirstLaunch()
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        lighting.restoreBeforeQuit()
+    /// Quitting waits for the keyboard to get its own lighting back, up to a moment: a keyboard
+    /// that doesn't answer shouldn't keep the app open.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let lighting = lighting
+        Task {
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { await lighting.restoreBeforeQuit() }
+                group.addTask { try? await Task.sleep(for: .seconds(1.5)) }
+                await group.next()
+                group.cancelAll()
+            }
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 }
 

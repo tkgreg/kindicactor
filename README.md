@@ -24,10 +24,11 @@ KIndicator reads the active layer from the keyboard and shows it in the menu bar
   lights go off when the Mac's display sleeps and come back when it wakes. Nothing
   is saved on the keyboard.
 - **Mic indicator.** While any app records from a microphone, a key of your choice
-  lights up in your colour, and gets its own colour back afterwards. Pick the key on a
-  drawing of your keyboard that shows what each key does on the active layer.
-  Works with the Per-key RGB effect. Nothing is saved on the keyboard, and it needs
-  no microphone permission.
+  pulses (or stays lit) in your colour, and gets its own colour back afterwards. Pick
+  the key on a drawing of your keyboard that shows what each key does on the active
+  layer. Works with the Per-key RGB effect; a layer set to Solid Color is drawn key by
+  key meanwhile, so the key shows there too. Nothing is saved on the keyboard, and it
+  needs no microphone permission.
 - **Lighting from the menu.** Switch the keyboard's effect (Breathing, Per-key RGB,
   Off, …) without opening Keychron Launcher.
 - **Launch actions.** One global shortcut switches the input language, then opens
