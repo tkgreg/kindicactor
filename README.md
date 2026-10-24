@@ -20,6 +20,9 @@ KIndicator reads the active layer from the keyboard and shows it in the menu bar
   type a hex value), so the keyboard itself shows which layer is on. Your saved
   lighting comes back when you return. Nothing is written to the keyboard's
   storage on each switch.
+- **Lights off while the display sleeps.** Like a MacBook's keyboard backlight: the
+  lights go off when the Mac's display sleeps and come back when it wakes. Nothing
+  is saved on the keyboard.
 - **Lighting from the menu.** Switch the keyboard's effect (Breathing, Per-key RGB,
   Off, …) without opening Keychron Launcher.
 - **Launch actions.** One global shortcut switches the input language, then opens

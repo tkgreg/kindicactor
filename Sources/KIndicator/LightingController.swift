@@ -1,5 +1,5 @@
+import AppKit
 import Combine
-import Foundation
 import OSLog
 
 private let log = Logger(subsystem: "local.kindicator", category: "lighting")
@@ -7,7 +7,8 @@ private let log = Logger(subsystem: "local.kindicator", category: "lighting")
 /// Reads and changes the keyboard's RGB lighting, and switches it per layer.
 ///
 /// `saved` is the lighting stored on the keyboard. A layer's own lighting is put on top
-/// without saving, and `saved` comes back on layers set to Keep.
+/// without saving, and `saved` comes back on layers set to Keep. While the Mac's displays
+/// sleep, Off is put on top the same way.
 ///
 /// Only values that differ from what the keyboard shows are sent: setting the effect is
 /// slow (60–100 ms) and resending brightness loses a step to rounding each time.
@@ -32,8 +33,18 @@ final class LightingController: ObservableObject {
 
     private let monitor: KeyboardMonitor
     private let settings: AppSettings
-    /// A layer's lighting currently shown on the keyboard (not saved), if any.
+    /// Lighting shown on top of the saved one (a layer's, or Off while the displays sleep),
+    /// not saved; nil while the keyboard shows the saved lighting.
     private var applied: LayerLighting?
+    /// `applied` is Off for the displays' sleep.
+    private var lightsOffShown = false
+    private var displaysAsleep = false {
+        didSet {
+            guard displaysAsleep != oldValue else { return }
+            log.notice("displays \(self.displaysAsleep ? "asleep" : "awake", privacy: .public)")
+            scheduleSync()
+        }
+    }
     /// Menu changes not yet sent; a refresh in between would undo them in the menu.
     private var pendingChanges = 0
     private var queue: Task<Void, Never>?
@@ -55,8 +66,20 @@ final class LightingController: ObservableObject {
         monitor.$layer.removeDuplicates()
             .sink { [weak self] _ in self?.scheduleSync() }
             .store(in: &subscriptions)
-        settings.$layerLighting.combineLatest(settings.$layerLightingEnabled)
+        settings.$layerLighting.combineLatest(settings.$layerLightingEnabled, settings.$lightsOffWhileDisplaysSleep)
             .sink { [weak self] _ in self?.scheduleSync() }
+            .store(in: &subscriptions)
+
+        // Like a MacBook's keyboard backlight. Sleeping the Mac also counts: its displays
+        // may be reported asleep too late to turn the lights off in time.
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.publisher(for: NSWorkspace.screensDidSleepNotification)
+            .merge(with: workspace.publisher(for: NSWorkspace.willSleepNotification))
+            .sink { [weak self] _ in self?.displaysAsleep = true }
+            .store(in: &subscriptions)
+        workspace.publisher(for: NSWorkspace.screensDidWakeNotification)
+            .merge(with: workspace.publisher(for: NSWorkspace.didWakeNotification))
+            .sink { [weak self] _ in self?.displaysAsleep = false }
             .store(in: &subscriptions)
 
         // Picks up changes made with the keyboard's light keys or in Keychron Launcher.
@@ -120,8 +143,18 @@ final class LightingController: ObservableObject {
 
     private func sync() async {
         guard monitor.isConnected, let layer = monitor.layer else { return }
-        let target = settings.layerLightingEnabled ? settings.lighting(for: layer) : nil
+        let lightsOff = displaysAsleep && settings.lightsOffWhileDisplaysSleep
+        let target = lightsOff ? lightsOffLighting : settings.layerLightingEnabled ? settings.lighting(for: layer) : nil
         guard target != applied else { return }
+
+        // The keyboard may have restarted while its lights were off and show the saved
+        // lighting again, so wake up through that: restoring it reads what the keyboard shows.
+        if lightsOffShown, !lightsOff {
+            await restoreSaved()
+            guard applied == nil else { return }
+            log.notice("lights back on")
+            guard target != nil else { return }
+        }
 
         if let target {
             // The 3 s refresh may not have seen lights just turned off with the keyboard's keys,
@@ -130,48 +163,54 @@ final class LightingController: ObservableObject {
             guard let saved else { return }
             guard await write(overlay(target, on: saved), over: shown(saved)) else { return }
             applied = target
-            log.notice("layer \(layer) lighting: \(LightingEffect.name(target.effect), privacy: .public)")
+            lightsOffShown = lightsOff
+            log.notice("layer \(layer) lighting: \(lightsOff ? "off while displays sleep" : LightingEffect.name(target.effect), privacy: .public)")
         } else {
             await restoreSaved()
             log.notice("layer \(layer) lighting: saved")
         }
     }
 
+    /// Off, in the colour the keyboard shows, so only the effect changes.
+    private var lightsOffLighting: LayerLighting {
+        let color = applied.map { ($0.hue, $0.saturation) } ?? saved.map { ($0.hue, $0.saturation) } ?? (0, 255)
+        return LayerLighting(effect: 0, hue: color.0, saturation: color.1)
+    }
+
     private func restoreSaved() async {
-        guard let applied, var lighting = saved else {
+        guard let applied, let before = saved else {
             self.applied = nil
+            lightsOffShown = false
             return
         }
+        var lighting = before
         var current = overlay(applied, on: lighting)
         // Light keys pressed while the layer's lighting was on (Fn + light keys) changed the
         // keyboard; keep those changes and save them instead of undoing them.
-        var changedOnKeyboard = false
         if let now = await read() {
             log.notice("keyboard shows \(now.summary, privacy: .public)")
             if abs(Int(now.brightness) - Int(lighting.brightness)) > 2 {
                 lighting.brightness = now.brightness
-                changedOnKeyboard = true
             }
             if now.speed != lighting.speed {
                 lighting.speed = now.speed
-                changedOnKeyboard = true
             }
             if now.effect != applied.effect {
                 lighting.effect = now.effect
-                changedOnKeyboard = true
             }
             if (now.hue, now.saturation) != (applied.hue, applied.saturation) {
                 lighting.hue = now.hue
                 lighting.saturation = now.saturation
-                changedOnKeyboard = true
             }
             current = Lighting(effect: now.effect, brightness: lighting.brightness, speed: lighting.speed,
                                hue: now.hue, saturation: now.saturation)
         }
         guard await write(lighting, over: current) else { return }
-        if changedOnKeyboard { await save() }
+        // A keyboard that restarted shows the saved lighting again: nothing new to save.
+        if lighting != before { await save() }
         saved = lighting
         self.applied = nil
+        lightsOffShown = false
     }
 
     /// What the keyboard shows: the saved lighting, or a layer's lighting on top of it.

@@ -209,6 +209,12 @@ struct SettingsView: View {
                     .labelsHidden()
                     .toggleStyle(.switch)
             }
+            SettingsRow(title: "Lights Off While Display Sleeps",
+                        description: "Turn the keyboard's lights off when the Mac's display sleeps, and back on when it wakes, without saving it on the keyboard.") {
+                Toggle("Lights Off While Display Sleeps", isOn: $settings.lightsOffWhileDisplaysSleep)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
             SettingsNote(text: "Layers set to Keep saved show the lighting saved on the keyboard; change it from the menu bar › Lighting. Needs the cable or 2.4 GHz.")
         }
     }

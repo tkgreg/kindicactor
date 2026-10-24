@@ -30,6 +30,7 @@ final class AppSettings: ObservableObject {
         static let pollIntervalMs = "pollIntervalMs"
         static let layerLighting = "layerLighting"
         static let layerLightingEnabled = "layerLightingEnabled"
+        static let lightsOffWhileDisplaysSleep = "lightsOffWhileDisplaysSleep"
         static let launchActions = "launchActions"
     }
 
@@ -57,6 +58,9 @@ final class AppSettings: ObservableObject {
     @Published var layerLightingEnabled: Bool {
         didSet { defaults.set(layerLightingEnabled, forKey: Key.layerLightingEnabled) }
     }
+    @Published var lightsOffWhileDisplaysSleep: Bool {
+        didSet { defaults.set(lightsOffWhileDisplaysSleep, forKey: Key.lightsOffWhileDisplaysSleep) }
+    }
     @Published var launchActions: [LaunchAction] {
         didSet { defaults.set(try? JSONEncoder().encode(launchActions), forKey: Key.launchActions) }
     }
@@ -71,6 +75,7 @@ final class AppSettings: ObservableObject {
         layerLighting = defaults.data(forKey: Key.layerLighting)
             .flatMap { try? JSONDecoder().decode([LayerLighting?].self, from: $0) } ?? []
         layerLightingEnabled = defaults.object(forKey: Key.layerLightingEnabled) as? Bool ?? true
+        lightsOffWhileDisplaysSleep = defaults.object(forKey: Key.lightsOffWhileDisplaysSleep) as? Bool ?? true
         launchActions = defaults.data(forKey: Key.launchActions)
             .flatMap { try? JSONDecoder().decode([LaunchAction].self, from: $0) } ?? []
     }
