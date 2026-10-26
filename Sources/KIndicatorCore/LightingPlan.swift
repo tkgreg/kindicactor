@@ -4,14 +4,27 @@ import Foundation
 /// shows and what it should show, which requests get it there.
 ///
 /// The saved lighting stays on the keyboard; a layer's lighting, or Off while the Mac's
-/// displays sleep, is put on top without saving (`applied`).
+/// displays sleep, is put on top without saving (`applied`), and so is the room's
+/// `brightness`.
 ///
 /// While its lights are off the keyboard reports the effect as Off, ignores colour and
 /// brightness, and keeps the effect its light key turns back on (`keptEffect`).
 package enum LightingPlan {
-    /// What the keyboard shows: the saved lighting, or `applied` on top of it.
-    package static func shown(saved: Lighting, applied: LayerLighting?) -> Lighting {
-        applied.map { overlay($0, on: saved) } ?? saved
+    /// What the keyboard shows: the saved lighting, or `applied` on top of it, at the room's
+    /// `brightness` if it follows the room.
+    package static func shown(saved: Lighting, applied: LayerLighting?, brightness: UInt8? = nil) -> Lighting {
+        var shown = applied.map { overlay($0, on: saved) } ?? saved
+        if let brightness { shown.brightness = brightness }
+        return shown
+    }
+
+    /// The saved lighting, read from the keyboard while it shows no layer's lighting. While
+    /// it shows the room's `brightness`, the saved brightness can't be read and stays as it was.
+    package static func saved(keyboardShows now: Lighting, saved: Lighting?, brightness: UInt8?) -> Lighting {
+        guard brightness != nil, let saved else { return now }
+        var lighting = now
+        lighting.brightness = saved.brightness
+        return lighting
     }
 
     /// A layer's lighting on top of the saved one; brightness and speed stay as saved.
@@ -76,9 +89,17 @@ package enum LightingPlan {
         return requests
     }
 
+    /// The keyboard keeps brightness in coarser steps than the 0...255 it reports and rounds
+    /// down both ways, so the 40 it reported, written back, reads as 39. Writing one more
+    /// than it reported gets its step back.
+    package static func brightnessCorrection(wrote: UInt8, reads: UInt8) -> KeyboardRequest? {
+        reads < wrote && wrote < 255 ? .setBrightness(wrote + 1) : nil
+    }
+
     /// Going back from `applied` to the saved lighting.
     package struct Restore: Equatable, Sendable {
-        /// The saved lighting to show, with changes made on the keyboard meanwhile.
+        /// The saved lighting to show (at the room's brightness, if it follows the room),
+        /// with changes made on the keyboard meanwhile.
         package var lighting: Lighting
         /// What the keyboard shows now, to write `lighting` over.
         package var current: Lighting
@@ -90,14 +111,22 @@ package enum LightingPlan {
     /// those changes are kept and saved instead of undone. `keyboardShows` is nil when the
     /// keyboard couldn't be read. A keyboard that restarted shows the saved lighting again,
     /// so there's nothing new to save.
-    package static func restore(saved: Lighting, applied: LayerLighting, keyboardShows now: Lighting?) -> Restore {
+    ///
+    /// While the brightness follows the room (`brightness`), the light keys' brightness
+    /// isn't kept: the room's comes back.
+    package static func restore(saved: Lighting, applied: LayerLighting, brightness: UInt8? = nil,
+                                keyboardShows now: Lighting?) -> Restore {
         guard let now else {
-            return Restore(lighting: saved, current: overlay(applied, on: saved), needsSave: false)
+            return Restore(lighting: saved, current: shown(saved: saved, applied: applied, brightness: brightness),
+                           needsSave: false)
         }
         var lighting = saved
-        if abs(Int(now.brightness) - Int(saved.brightness)) > 2 {
+        if brightness == nil, abs(Int(now.brightness) - Int(saved.brightness)) > 2 {
             lighting.brightness = now.brightness
         }
+        // Resending brightness loses a step to rounding, so a close one counts as sent.
+        let shownBrightness = brightness ?? lighting.brightness
+        let currentBrightness = abs(Int(now.brightness) - Int(shownBrightness)) > 2 ? now.brightness : shownBrightness
         lighting.speed = now.speed
         if now.effect != applied.effect {
             lighting.effect = now.effect
@@ -106,7 +135,7 @@ package enum LightingPlan {
             lighting.hue = now.hue
             lighting.saturation = now.saturation
         }
-        let current = Lighting(effect: now.effect, brightness: lighting.brightness, speed: lighting.speed,
+        let current = Lighting(effect: now.effect, brightness: currentBrightness, speed: lighting.speed,
                                hue: now.hue, saturation: now.saturation)
         return Restore(lighting: lighting, current: current, needsSave: lighting != saved)
     }

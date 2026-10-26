@@ -19,7 +19,7 @@ struct KIndicatorApp: App {
         Window("KIndicator", id: SettingsView.windowID) {
             SettingsView(monitor: appDelegate.monitor, settings: appDelegate.settings,
                          lighting: appDelegate.lighting, microphone: appDelegate.microphone,
-                         maps: appDelegate.maps, updates: appDelegate.updates)
+                         maps: appDelegate.maps, roomLight: appDelegate.roomLight, updates: appDelegate.updates)
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
@@ -34,8 +34,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let monitor = KeyboardMonitor()
     let updates = UpdateChecker()
     let microphone = MicrophoneMonitor()
+    let roomLight = AmbientLightSensor()
     lazy var maps = KeyboardMaps(monitor: monitor)
-    lazy var lighting = LightingController(monitor: monitor, settings: settings, microphone: microphone, maps: maps)
+    lazy var lighting = LightingController(monitor: monitor, settings: settings, microphone: microphone, maps: maps,
+                                             roomLight: roomLight)
     lazy var launchActions = LaunchActionRunner(settings: settings)
     private var subscriptions: Set<AnyCancellable> = []
 
@@ -45,6 +47,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &subscriptions)
         settings.$pollIntervalMs
             .sink { [monitor] in monitor.pollInterval = .milliseconds($0) }
+            .store(in: &subscriptions)
+        settings.$roomBrightness.map(\.enabled).removeDuplicates()
+            .sink { [roomLight] in roomLight.isRunning = $0 }
             .store(in: &subscriptions)
         monitor.start()
         microphone.start()
@@ -165,6 +170,9 @@ struct LightingMenu: View {
                 Divider()
                 if settings.hasLayerLighting {
                     Toggle("Change with Layer", isOn: $settings.layerLightingEnabled)
+                }
+                if AmbientLightSensor.isAvailable {
+                    Toggle("Adjust Brightness to Room Light", isOn: $settings.roomBrightness.enabled)
                 }
                 Button("Lighting per Layer…") { openSettings(.layers) }
             } else {

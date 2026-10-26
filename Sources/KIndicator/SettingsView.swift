@@ -37,6 +37,7 @@ struct SettingsView: View {
     @ObservedObject var lighting: LightingController
     @ObservedObject var microphone: MicrophoneMonitor
     @ObservedObject var maps: KeyboardMaps
+    @ObservedObject var roomLight: AmbientLightSensor
     let updates: UpdateChecker
     @AppStorage(SettingsView.tabKey) private var tab = SettingsTab.layers
     @State private var launchAtLogin = LoginItem.isEnabled
@@ -220,6 +221,22 @@ struct SettingsView: View {
             }
             SettingsNote(text: "Layers set to Keep saved show the lighting saved on the keyboard; change it from the menu bar › Lighting. Needs the cable or 2.4 GHz.")
         }
+        SettingsGroup(title: "Brightness") {
+            SettingsRow(title: "Adjust Brightness to Room Light",
+                        description: "Dim the keyboard in a dark room and brighten it in a bright one, using the Mac's ambient light sensor, without saving it on the keyboard.") {
+                Toggle("Adjust Brightness to Room Light", isOn: $settings.roomBrightness.enabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+            .disabled(!AmbientLightSensor.isAvailable)
+            SettingsRow(title: "In a Dark Room") {
+                brightnessSlider(\.dark)
+            }
+            SettingsRow(title: "In a Bright Room") {
+                brightnessSlider(\.bright)
+            }
+            SettingsNote(text: roomLightStatus)
+        }
         SettingsGroup(title: "Mic Indicator") {
             SettingsRow(title: "Light a Key While Mic Is in Use",
                         description: "While any app records from a microphone, the key shows this colour, without saving it on the keyboard.") {
@@ -282,6 +299,49 @@ struct SettingsView: View {
         }
         .disabled(!indicator.enabled)
         .onAppear { maps.loadKeymap() }
+    }
+
+    /// A brightness of the range, in percent.
+    private func brightnessSlider(_ end: WritableKeyPath<RoomBrightness, UInt8>) -> some View {
+        let brightness = settings.roomBrightness[keyPath: end]
+        return HStack(spacing: 10) {
+            Slider(value: Binding(get: { Double(brightness) / 255 },
+                                  set: { settings.roomBrightness[keyPath: end] = UInt8(($0 * 255).rounded()) }))
+                .frame(width: 180)
+            Text(Self.percent(brightness))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(width: 40, alignment: .trailing)
+        }
+        .disabled(!settings.roomBrightness.enabled)
+    }
+
+    /// What the sensor sees now and the brightness it gives, or why it can't.
+    private var roomLightStatus: String {
+        guard AmbientLightSensor.isAvailable else {
+            return "This Mac has no ambient light sensor. MacBooks and iMacs have one, beside the camera."
+        }
+        let room = settings.roomBrightness
+        let how = "Between a dark room (\(Int(RoomBrightness.darkLux)) lux or less) and a bright one (\(Int(RoomBrightness.brightLux)) lux or more) the brightness changes gradually. The keyboard's light keys change it until the room's light changes; its saved brightness comes back when this is off or KIndicator quits."
+        guard room.enabled else { return how }
+        let now: String
+        if roomLight.lidClosed {
+            now = "The lid is closed over the sensor, so the keyboard shows its saved brightness."
+        } else if let lux = roomLight.lux {
+            let light = switch lux {
+            case RoomBrightness.darkLux: "dark"
+            case RoomBrightness.brightLux: "bright"
+            default: "about \(Int(lux.rounded())) lux"
+            }
+            now = "The room is \(light) now, so the keyboard is at \(Self.percent(room.brightness(lux: lux)))."
+        } else {
+            now = "Reading the sensor…"
+        }
+        return "\(now) \(how)"
+    }
+
+    private static func percent(_ brightness: UInt8) -> String {
+        "\(Int((Double(brightness) / 255 * 100).rounded()))%"
     }
 
     /// Who's using the microphone, and why the key can't light up, if it can't.

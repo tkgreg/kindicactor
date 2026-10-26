@@ -82,6 +82,60 @@ struct LightingPlanTests {
         #expect(!restore.needsSave)
     }
 
+    // MARK: Brightness following the room
+
+    @Test func roomBrightnessIsShownOverEverything() {
+        #expect(LightingPlan.shown(saved: perKey, applied: nil, brightness: 200).brightness == 200)
+        let layered = LightingPlan.shown(saved: perKey, applied: greenSolid, brightness: 200)
+        #expect(layered.brightness == 200)
+        #expect(layered.effect == 1)
+        // Changing it sends just the brightness.
+        #expect(LightingPlan.requests(from: LightingPlan.shown(saved: perKey, applied: greenSolid, brightness: 200),
+                                      to: LightingPlan.shown(saved: perKey, applied: greenSolid, brightness: 212),
+                                      keptEffect: 23) == [.setBrightness(212)])
+    }
+
+    @Test func savedBrightnessIsntReadWhileTheRoomsShows() {
+        var shown = perKey
+        shown.brightness = 200
+        shown.effect = 2
+        let saved = LightingPlan.saved(keyboardShows: shown, saved: perKey, brightness: 200)
+        #expect(saved.brightness == 80)
+        #expect(saved.effect == 2)
+        #expect(LightingPlan.saved(keyboardShows: shown, saved: perKey, brightness: nil) == shown)
+        #expect(LightingPlan.saved(keyboardShows: shown, saved: nil, brightness: 200) == shown)
+    }
+
+    @Test func restoreKeepsTheRoomsBrightness() {
+        let shown = LightingPlan.shown(saved: perKey, applied: greenSolid, brightness: 200)
+        let restore = LightingPlan.restore(saved: perKey, applied: greenSolid, brightness: 200, keyboardShows: shown)
+        #expect(restore.lighting == perKey)
+        #expect(!restore.needsSave)
+        // Nothing but the layer's lighting is undone.
+        #expect(LightingPlan.requests(from: restore.current,
+                                      to: LightingPlan.shown(saved: restore.lighting, applied: nil, brightness: 200),
+                                      keptEffect: 23) == [.setColor(hue: 21, saturation: 255), .setEffect(23)])
+    }
+
+    @Test func restoreUndoesLightKeyBrightnessWhileFollowingTheRoom() {
+        // Fn + brightness while the layer's lighting and the room's brightness showed.
+        var changed = LightingPlan.shown(saved: perKey, applied: greenSolid, brightness: 200)
+        changed.brightness = 120
+        let restore = LightingPlan.restore(saved: perKey, applied: greenSolid, brightness: 200, keyboardShows: changed)
+        #expect(restore.lighting.brightness == 80)
+        #expect(!restore.needsSave)
+        #expect(LightingPlan.requests(from: restore.current,
+                                      to: LightingPlan.shown(saved: restore.lighting, applied: nil, brightness: 200),
+                                      keptEffect: 23).contains(.setBrightness(200)))
+    }
+
+    @Test func savedBrightnessGetsItsStepBack() {
+        // Seen on the V6 Ultra 8K: 40 written back over the room's brightness read as 39.
+        #expect(LightingPlan.brightnessCorrection(wrote: 40, reads: 39) == .setBrightness(41))
+        #expect(LightingPlan.brightnessCorrection(wrote: 40, reads: 40) == nil)
+        #expect(LightingPlan.brightnessCorrection(wrote: 255, reads: 254) == nil)
+    }
+
     @Test func restoreWithoutReadingTheKeyboard() {
         let restore = LightingPlan.restore(saved: perKey, applied: greenSolid, keyboardShows: nil)
         #expect(restore.lighting == perKey)

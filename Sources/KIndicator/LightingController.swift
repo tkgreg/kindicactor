@@ -6,12 +6,13 @@ import OSLog
 private let log = Logger(subsystem: "local.kindicator", category: "lighting")
 
 /// Reads and changes the keyboard's RGB lighting: per layer, off while the displays sleep,
-/// and the mic indicator's key. What to send is decided by `LightingPlan` and
-/// `KeyColorsPlan`; this class reads the keyboard, sends the requests and keeps the state.
+/// brightness following the room's light, and the mic indicator's key. What to send is
+/// decided by `LightingPlan`, `RoomLightPlan` and `KeyColorsPlan`; this class reads the
+/// keyboard, sends the requests and keeps the state.
 ///
 /// `saved` is the lighting stored on the keyboard. A layer's own lighting, or Off while the
 /// Mac's displays sleep, is put on top without saving, and `saved` comes back on layers set
-/// to Keep. The mic indicator changes key colours, also without saving.
+/// to Keep. The room's brightness and the mic indicator's key colours aren't saved either.
 @MainActor
 final class LightingController: ObservableObject {
     /// The lighting stored on the keyboard; nil until it has been read.
@@ -32,6 +33,13 @@ final class LightingController: ObservableObject {
     private let settings: AppSettings
     private let microphone: MicrophoneMonitor
     private let maps: KeyboardMaps
+    private let roomLight: AmbientLightSensor
+    /// The brightness shown instead of the saved one, following the room's light, not saved;
+    /// nil while the keyboard shows its saved brightness.
+    private var roomBrightness: UInt8?
+    /// The keyboard may have restarted and show its saved brightness, so the room's is sent again.
+    private var roomBrightnessStale = false
+    private var fadeTicker: Task<Void, Never>?
     /// Per-key colours shown over the keyboard's own: the mic indicator, and a layer drawn
     /// key by key meanwhile.
     private var keyColors = KeyColors()
@@ -62,11 +70,13 @@ final class LightingController: ObservableObject {
     private var refreshTask: Task<Void, Never>?
     private var subscriptions: Set<AnyCancellable> = []
 
-    init(monitor: KeyboardMonitor, settings: AppSettings, microphone: MicrophoneMonitor, maps: KeyboardMaps) {
+    init(monitor: KeyboardMonitor, settings: AppSettings, microphone: MicrophoneMonitor, maps: KeyboardMaps,
+         roomLight: AmbientLightSensor) {
         self.monitor = monitor
         self.settings = settings
         self.microphone = microphone
         self.maps = maps
+        self.roomLight = roomLight
         keptEffect = (UserDefaults.standard.object(forKey: Self.keptEffectKey) as? Int).flatMap(UInt8.init(exactly:))
     }
 
@@ -75,6 +85,7 @@ final class LightingController: ObservableObject {
         monitor.$status.removeDuplicates()
             .sink { [weak self] _ in
                 self?.keyColorsStale = true
+                self?.roomBrightnessStale = true
                 self?.scheduleRefresh()
                 self?.scheduleSync()
             }
@@ -94,6 +105,11 @@ final class LightingController: ObservableObject {
             .sink { [weak self] _ in self?.scheduleSync() }
             .store(in: &subscriptions)
         maps.$ledMap.removeDuplicates()
+            .sink { [weak self] _ in self?.scheduleSync() }
+            .store(in: &subscriptions)
+        roomLight.$lux.combineLatest(settings.$roomBrightness)
+            .map { lux, room in room.enabled ? lux.map(room.brightness) : nil }
+            .removeDuplicates()
             .sink { [weak self] _ in self?.scheduleSync() }
             .store(in: &subscriptions)
 
@@ -139,14 +155,17 @@ final class LightingController: ObservableObject {
                 return
             }
             // Saving stores whatever the keyboard shows, so a layer's own lighting makes way first.
-            guard await self.write(lighting, over: LightingPlan.shown(saved: before, applied: self.applied)) else {
+            let unlayered = LightingPlan.shown(saved: lighting, applied: nil, brightness: self.roomBrightness)
+            guard await self.write(unlayered, over: LightingPlan.shown(saved: before, applied: self.applied,
+                                                                       brightness: self.roomBrightness)) else {
                 log.error("change failed: keyboard didn't confirm")
                 return
             }
             await self.save()
             log.notice("saved \(LightingEffect.name(lighting.effect), privacy: .public)")
             if let applied = self.applied {
-                await self.write(LightingPlan.overlay(applied, on: lighting), over: lighting)
+                await self.write(LightingPlan.shown(saved: lighting, applied: applied, brightness: self.roomBrightness),
+                                 over: unlayered)
             }
         }
     }
@@ -156,11 +175,16 @@ final class LightingController: ObservableObject {
         await withCheckedContinuation { continuation in
             enqueue {
                 self.pulseTicker?.cancel()
+                self.fadeTicker?.cancel()
                 for request in KeyColorsPlan.requests(setting: self.ownColorsOfShownKeys) {
                     _ = await self.monitor.request(request)
                 }
-                if let applied = self.applied, let saved = self.saved {
-                    await self.write(saved, over: LightingPlan.overlay(applied, on: saved))
+                if let saved = self.saved, self.applied != nil || self.roomBrightness != nil {
+                    await self.write(saved, over: LightingPlan.shown(saved: saved, applied: self.applied,
+                                                                     brightness: self.roomBrightness))
+                    if self.roomBrightness.map({ $0 != saved.brightness }) == true {
+                        await self.correctSavedBrightness()
+                    }
                 }
                 continuation.resume()
             }
@@ -173,6 +197,7 @@ final class LightingController: ObservableObject {
         enqueue {
             self.syncQueued = false
             await self.syncLayerLighting()
+            await self.syncRoomBrightness()
             await self.syncKeyColors()
         }
     }
@@ -208,8 +233,9 @@ final class LightingController: ObservableObject {
             // and colour sent before turning them back on is ignored: read them now.
             if applied == nil { await refreshSaved() }
             guard let saved else { return }
-            guard await write(LightingPlan.overlay(target, on: saved),
-                              over: LightingPlan.shown(saved: saved, applied: applied)) else { return }
+            guard await write(LightingPlan.shown(saved: saved, applied: target, brightness: roomBrightness),
+                              over: LightingPlan.shown(saved: saved, applied: applied, brightness: roomBrightness))
+            else { return }
             applied = target
             lightsOffShown = lightsOff
             log.notice("layer \(layer) lighting: \(lightsOff ? "off while displays sleep" : LightingEffect.name(target.effect), privacy: .public)")
@@ -227,12 +253,73 @@ final class LightingController: ObservableObject {
         }
         let now = await read()
         if let now { log.notice("keyboard shows \(now.summary, privacy: .public)") }
-        let restore = LightingPlan.restore(saved: saved, applied: applied, keyboardShows: now)
-        guard await write(restore.lighting, over: restore.current) else { return }
-        if restore.needsSave { await save() }
+        let restore = LightingPlan.restore(saved: saved, applied: applied, brightness: roomBrightness, keyboardShows: now)
+        guard await write(LightingPlan.shown(saved: restore.lighting, applied: nil, brightness: roomBrightness),
+                          over: restore.current) else { return }
         self.saved = restore.lighting
+        if restore.needsSave { await save() }
         self.applied = nil
         lightsOffShown = false
+    }
+
+    // MARK: - Room light
+
+    /// Fades the brightness toward the room's, one step per sync, or back to the saved one.
+    private func syncRoomBrightness() async {
+        guard monitor.isConnected, let saved else { return updateFade(false) }
+        let shown = LightingPlan.shown(saved: saved, applied: applied, brightness: roomBrightness)
+        // Brightness sent while the lights are off is ignored; the fade goes on once they're on.
+        guard shown.effect != LightingEffect.off else { return updateFade(false) }
+        if roomBrightnessStale {
+            roomBrightnessStale = false
+            if let roomBrightness, roomBrightness != saved.brightness {
+                _ = await monitor.request(.setBrightness(roomBrightness))
+            }
+        }
+
+        let room = settings.roomBrightness
+        let target = room.enabled ? roomLight.lux.map(room.brightness) : nil
+        let to = target ?? saved.brightness
+        let from = roomBrightness ?? saved.brightness
+        guard from != to else {
+            roomBrightness = target
+            return updateFade(false)
+        }
+        let next = RoomLightPlan.step(from: from, to: to)
+        if fadeTicker == nil {
+            let why = target == nil ? "saved" : "room \(Int(roomLight.lux ?? 0)) lux"
+            log.notice("brightness \(from) → \(to) (\(why, privacy: .public))")
+        }
+        guard await write(LightingPlan.shown(saved: saved, applied: applied, brightness: next), over: shown) else {
+            return updateFade(false)
+        }
+        roomBrightness = target == nil && next == saved.brightness ? nil : next
+        if roomBrightness == nil { await correctSavedBrightness() }
+        updateFade(next != to)
+    }
+
+    /// After the saved brightness is sent back over the room's: it may read one step lower
+    /// (see `LightingPlan.brightnessCorrection`).
+    private func correctSavedBrightness() async {
+        guard let saved, let now = await get(.brightness),
+              let correction = LightingPlan.brightnessCorrection(wrote: saved.brightness, reads: now[0]) else { return }
+        log.notice("brightness \(saved.brightness) reads \(now[0]): sent one more")
+        _ = await monitor.request(correction)
+    }
+
+    /// While the brightness fades, it changes about 30 times a second.
+    private func updateFade(_ fading: Bool) {
+        if fading, fadeTicker == nil {
+            fadeTicker = Task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(33))
+                    scheduleSync()
+                }
+            }
+        } else if !fading {
+            fadeTicker?.cancel()
+            fadeTicker = nil
+        }
     }
 
     // MARK: - Key colours
@@ -310,7 +397,8 @@ final class LightingController: ObservableObject {
     }
 
     private func refreshSaved() async {
-        guard applied == nil, pendingChanges == 0, let lighting = await read() else { return }
+        guard applied == nil, pendingChanges == 0, let read = await read() else { return }
+        let lighting = LightingPlan.saved(keyboardShows: read, saved: saved, brightness: roomBrightness)
         if saved != lighting {
             log.notice("read \(lighting.summary, privacy: .public)")
             saved = lighting
@@ -350,12 +438,22 @@ final class LightingController: ObservableObject {
         await monitor.request(.getLighting(value)).flatMap(KeyboardReply.lightingValue)
     }
 
+    /// Saves `saved`, which the keyboard shows (at the room's brightness, if it follows the room).
     private func save() async {
         // In case saving also stores the key colours, the keys shown get their own back meanwhile.
         for request in KeyColorsPlan.requests(setting: ownColorsOfShownKeys) {
             _ = await monitor.request(request)
         }
+        // Saving stores the brightness shown, so the saved one shows meanwhile.
+        let roomBrightness = roomBrightness.flatMap { $0 == saved?.brightness ? nil : $0 }
+        if roomBrightness != nil, let saved {
+            _ = await monitor.request(.setBrightness(saved.brightness))
+            await correctSavedBrightness()
+        }
         _ = await monitor.request(.saveLighting)
+        if let roomBrightness {
+            _ = await monitor.request(.setBrightness(roomBrightness))
+        }
         for request in KeyColorsPlan.requests(setting: keyColors.shown) {
             _ = await monitor.request(request)
         }
