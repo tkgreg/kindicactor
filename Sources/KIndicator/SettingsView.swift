@@ -2,7 +2,7 @@ import KIndicatorCore
 import SwiftUI
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, layers, knob, launchActions, connection, about
+    case general, layers, knob, mouse, launchActions, connection, about
 
     var id: String { rawValue }
 
@@ -11,6 +11,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .general: "General"
         case .layers: "Layers"
         case .knob: "Knob"
+        case .mouse: "Mouse"
         case .launchActions: "Launch Actions"
         case .connection: "Connection"
         case .about: "About"
@@ -22,6 +23,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .general: "slider.horizontal.3"
         case .layers: "square.3.layers.3d"
         case .knob: "dial.medium"
+        case .mouse: "computermouse"
         case .launchActions: "command"
         case .connection: "cable.connector"
         case .about: "info.circle"
@@ -41,6 +43,7 @@ struct SettingsView: View {
     @ObservedObject var maps: KeyboardMaps
     @ObservedObject var roomLight: AmbientLightSensor
     let knob: KnobController
+    let mouse: MouseController
     let updates: UpdateChecker
     @AppStorage(SettingsView.tabKey) private var tab = SettingsTab.layers
     @State private var launchAtLogin = LoginItem.isEnabled
@@ -109,6 +112,7 @@ struct SettingsView: View {
         case .general: generalPage
         case .layers: layersPage
         case .knob: KnobSettings(settings: settings, knob: knob, monitor: monitor)
+        case .mouse: MouseSettings(settings: settings, mouse: mouse)
         case .launchActions: LaunchActionsSettings(settings: settings)
         case .connection: connectionPage
         case .about: AboutPage(updates: updates)

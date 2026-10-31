@@ -1,4 +1,3 @@
-import AppKit
 import KIndicatorCore
 import SwiftUI
 
@@ -40,48 +39,9 @@ struct KnobSettings: View {
             SettingsNote(text: status)
         }
         SettingsGroup(title: "Actions") {
-            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 12) {
-                GridRow {
-                    ForEach(["App", "Turn Left", "Turn Right", "Press"], id: \.self) { heading in
-                        Text(heading)
-                    }
-                }
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-                GridRow {
-                    Label("All Apps", systemImage: "square.grid.2x2")
-                        .frame(width: 120, alignment: .leading)
-                    ForEach(KnobInput.allCases, id: \.self) { input in
-                        KnobActionMenu(action: actionBinding($settings.knobControl.allApps, input), inherited: nil)
-                    }
-                    presetMenu($settings.knobControl.allApps, forApp: false)
-                }
-                ForEach($settings.knobControl.apps) { $app in
-                    GridRow {
-                        Label {
-                            Text(app.name).lineLimit(1)
-                        } icon: {
-                            Image(nsImage: Self.icon(app))
-                        }
-                        .frame(width: 120, alignment: .leading)
-                        .help(app.bundleID)
-                        ForEach(KnobInput.allCases, id: \.self) { input in
-                            KnobActionMenu(action: actionBinding($app.mapping, input),
-                                           inherited: settings.knobControl.allApps[input] ?? .nothing)
-                        }
-                        presetMenu($app.mapping, forApp: true)
-                        Button {
-                            settings.knobControl.apps.removeAll { $0.id == app.id }
-                        } label: {
-                            Image(systemName: "minus.circle.fill")
-                        }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(.secondary)
-                        .help("Remove")
-                    }
-                }
-            }
-            addAppMenu
+            AppActionsGrid(inputs: [(.turnLeft, "Turn Left"), (.turnRight, "Turn Right"), (.press, "Press")],
+                           allApps: $settings.knobControl.allApps, apps: $settings.knobControl.apps,
+                           presets: KnobPreset.all.map { ($0.name, $0.mapping) })
             SettingsNote(text: "Precise Volume changes the volume in quarter steps, as the volume keys do with ⌥⇧ held, and speeds up while you spin the knob: from one quarter step (about 1.6%) a click when turned slowly up to five (about 8%). An app's dimmed actions are the ones for all apps. Shortcuts are pressed in the frontmost app.")
         }
         .disabled(!settings.knobControl.enabled)
@@ -115,68 +75,6 @@ struct KnobSettings: View {
         }
     }
 
-    /// Fills all three actions; an app's can go back to the ones for all apps.
-    private func presetMenu(_ mapping: Binding<KnobMapping>, forApp: Bool) -> some View {
-        Menu {
-            ForEach(KnobPreset.all) { preset in
-                Button(preset.name) { mapping.wrappedValue = preset.mapping }
-            }
-            if forApp {
-                Divider()
-                Button("Same as All Apps") { mapping.wrappedValue = KnobMapping() }
-            }
-        } label: {
-            Image(systemName: "wand.and.stars")
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Presets")
-    }
-
-    private var addAppMenu: some View {
-        let added = Set(settings.knobControl.apps.map(\.bundleID))
-        let running = NSWorkspace.shared.runningApplications
-            .filter { app in
-                app.activationPolicy == .regular && app.bundleURL != nil
-                    && app.bundleIdentifier.map { !added.contains($0) && $0 != Bundle.main.bundleIdentifier } == true
-            }
-            .sorted { ($0.localizedName ?? "").localizedStandardCompare($1.localizedName ?? "") == .orderedAscending }
-        return Menu("Add App") {
-            ForEach(running, id: \.processIdentifier) { app in
-                Button {
-                    add(app.bundleURL!)
-                } label: {
-                    Label {
-                        Text(app.localizedName ?? app.bundleIdentifier ?? "")
-                    } icon: {
-                        Image(nsImage: Self.small(app.icon ?? NSWorkspace.shared.icon(forFile: app.bundleURL!.path)))
-                    }
-                }
-            }
-            if !running.isEmpty { Divider() }
-            Button("Choose App…", action: chooseApp)
-        }
-        .fixedSize()
-    }
-
-    private func chooseApp() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.application]
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        panel.prompt = "Add"
-        if panel.runModal() == .OK, let url = panel.url {
-            add(url)
-        }
-    }
-
-    private func add(_ url: URL) {
-        guard let bundleID = Bundle(url: url)?.bundleIdentifier else { return NSSound.beep() }
-        guard !settings.knobControl.apps.contains(where: { $0.bundleID == bundleID }) else { return }
-        let name = (FileManager.default.displayName(atPath: url.path) as NSString).deletingPathExtension
-        settings.knobControl.apps.append(KnobAppMapping(bundleID: bundleID, name: name, path: url.path))
-    }
-
     // MARK: - Bindings
 
     private var enabledBinding: Binding<Bool> {
@@ -200,81 +98,5 @@ struct KnobSettings: View {
                 }
             }
         )
-    }
-
-    private func actionBinding(_ mapping: Binding<KnobMapping>, _ input: KnobInput) -> Binding<KnobAction?> {
-        Binding(get: { mapping.wrappedValue[input] }, set: { mapping.wrappedValue[input] = $0 })
-    }
-
-    private static func icon(_ app: KnobAppMapping) -> NSImage {
-        let path = app.path.flatMap { FileManager.default.fileExists(atPath: $0) ? $0 : nil }
-            ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: app.bundleID)?.path
-        return small(path.map(NSWorkspace.shared.icon(forFile:)) ?? NSWorkspace.shared.icon(for: .application))
-    }
-
-    private static func small(_ icon: NSImage) -> NSImage {
-        let copy = icon.copy() as! NSImage
-        copy.size = NSSize(width: 16, height: 16)
-        return copy
-    }
-}
-
-/// What one of the knob's inputs does: a media key, a recorded shortcut or nothing. An app's
-/// can be left to the action for all apps, which then shows dimmed.
-struct KnobActionMenu: View {
-    @Binding var action: KnobAction?
-    /// The action for all apps, in an app's menu; nil in the all-apps one.
-    let inherited: KnobAction?
-    @State private var capture = ShortcutCapture()
-
-    private static let sections: [(title: String, keys: [MediaKey])] = [
-        ("Volume", [.volumeDown, .volumeUp, .mute, .preciseVolumeDown, .preciseVolumeUp]),
-        ("Media", [.previousTrack, .playPause, .nextTrack]),
-        ("Display", [.brightnessDown, .brightnessUp]),
-    ]
-
-    var body: some View {
-        Group {
-            if capture.isActive {
-                Button("Type shortcut…") { capture.stop() }
-            } else {
-                Menu {
-                    if let inherited {
-                        check("Same as All Apps (\(inherited.title))", action == nil) { action = nil }
-                        Divider()
-                    }
-                    check("Nothing", action == .nothing) { action = .nothing }
-                    ForEach(Self.sections, id: \.title) { section in
-                        Section(section.title) {
-                            ForEach(section.keys, id: \.self) { key in
-                                check(key.title, action == .media(key)) { action = .media(key) }
-                            }
-                        }
-                    }
-                    Divider()
-                    if case .shortcut(let hotkey) = action {
-                        check(hotkey.display, true) {}
-                    }
-                    Button("Record Shortcut…", action: record)
-                } label: {
-                    Text((action ?? inherited ?? .nothing).title)
-                }
-                .opacity(action == nil && inherited != nil ? 0.55 : 1)
-            }
-        }
-        .frame(width: 140)
-        .onDisappear(perform: capture.stop)
-    }
-
-    private func record() {
-        capture.start(allowsPlainKeys: true) { recorded in
-            guard let recorded else { return }
-            guard !KnobController.isKnobKey(recorded) else { return NSSound.beep() }
-            action = .shortcut(recorded)
-        }
-    }
-
-    private func check(_ title: String, _ isOn: Bool, _ select: @escaping () -> Void) -> some View {
-        Toggle(title, isOn: Binding(get: { isOn }, set: { _ in select() }))
     }
 }

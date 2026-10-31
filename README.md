@@ -39,6 +39,11 @@ KIndicator reads the active layer from the keyboard and shows it in the menu bar
   so KIndicator sets it to send F18, F19 and F20 (on the layers you pick, saved on the
   keyboard) and turns those into your actions. Turning it off gives the knob its own
   keys back. Needs Accessibility permission, to press the keys.
+- **Mouse double-clicks.** Double-click a mouse's Back or Forward button for a media
+  key or any shortcut, with different actions in different apps, e.g. double-click Back
+  to close a tab in Safari. A single click still goes back or forward, a moment later
+  (0.3 s, adjustable), and only a button with an action waits. Needs Accessibility
+  permission.
 - **Lighting from the menu.** Switch the keyboard's effect (Breathing, Per-key RGB,
   Off, …) without opening Keychron Launcher.
 - **Launch actions.** One global shortcut switches the input language, then opens
@@ -50,7 +55,8 @@ KIndicator reads the active layer from the keyboard and shows it in the menu bar
 - **Plays nice with Keychron Launcher.** Pauses automatically while Launcher is
   open, so the two apps don't confuse the keyboard.
 - **Lightweight.** Starts at login, lives in the menu bar, needs no special
-  permissions (no Input Monitoring; Accessibility only for Knob Control).
+  permissions (no Input Monitoring; Accessibility only for Knob Control and mouse
+  double-clicks).
 
 ![Launch actions: shortcut, input source and app](docs/launch-actions.png)
 
@@ -146,7 +152,10 @@ Keychron's ZMK firmware exposes the same raw HID channel Keychron Launcher uses
 Launch actions use Carbon hotkeys and the Text Input Sources API, which need no
 permissions. Knob Control listens for F18-F20 the same way, and presses media keys as
 system-defined events (with ⌥⇧ for precise volume) and shortcuts as key events, which
-macOS allows only with Accessibility permission. The mic indicator asks Core Audio which processes are recording
+macOS allows only with Accessibility permission. Mouse double-clicks use an event tap on
+the Back and Forward buttons (buttons 4 and 5): a press of a button with an action is held
+back until the double-click time runs out, then sent on as it was; a second press within
+it runs the action instead. The mic indicator asks Core Audio which processes are recording
 (`kAudioProcessPropertyIsRunningInput`); it records nothing, so it needs no
 microphone permission either. Room brightness reads the ambient light sensor once a
 second through IOKit's HID event system (falling back to the sensor's `CurrentLux` in

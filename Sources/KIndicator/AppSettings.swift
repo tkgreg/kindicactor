@@ -36,6 +36,7 @@ final class AppSettings: ObservableObject {
         static let roomBrightness = "roomBrightness"
         static let launchActions = "launchActions"
         static let knobControl = "knobControl"
+        static let mouseControl = "mouseControl"
     }
 
     private let defaults = UserDefaults.standard
@@ -77,6 +78,9 @@ final class AppSettings: ObservableObject {
     @Published var knobControl: KnobControl {
         didSet { defaults.set(try? JSONEncoder().encode(knobControl), forKey: Key.knobControl) }
     }
+    @Published var mouseControl: MouseControl {
+        didSet { defaults.set(try? JSONEncoder().encode(mouseControl), forKey: Key.mouseControl) }
+    }
 
     init() {
         layerNames = defaults.stringArray(forKey: Key.layerNames) ?? Self.defaultLayerNames
@@ -97,6 +101,8 @@ final class AppSettings: ObservableObject {
             .flatMap { try? JSONDecoder().decode([LaunchAction].self, from: $0) } ?? []
         knobControl = defaults.data(forKey: Key.knobControl)
             .flatMap { try? JSONDecoder().decode(KnobControl.self, from: $0) } ?? KnobControl()
+        mouseControl = defaults.data(forKey: Key.mouseControl)
+            .flatMap { try? JSONDecoder().decode(MouseControl.self, from: $0) } ?? MouseControl()
     }
 
     var hasLayerLighting: Bool { layerLighting.contains { $0 != nil } }

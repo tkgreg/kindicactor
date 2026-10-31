@@ -20,7 +20,7 @@ struct KIndicatorApp: App {
             SettingsView(monitor: appDelegate.monitor, settings: appDelegate.settings,
                          lighting: appDelegate.lighting, microphone: appDelegate.microphone,
                          maps: appDelegate.maps, roomLight: appDelegate.roomLight, knob: appDelegate.knob,
-                         updates: appDelegate.updates)
+                         mouse: appDelegate.mouse, updates: appDelegate.updates)
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                              roomLight: roomLight)
     lazy var launchActions = LaunchActionRunner(settings: settings)
     lazy var knob = KnobController(monitor: monitor, settings: settings, maps: maps)
+    lazy var mouse = MouseController(settings: settings)
     private var subscriptions: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -59,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lighting.start()
         launchActions.start()
         knob.start()
+        mouse.start()
         LoginItem.enableOnFirstLaunch()
     }
 
