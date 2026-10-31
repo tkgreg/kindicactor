@@ -33,6 +33,16 @@ struct KnobControlTests {
         #expect(Hotkey(keyCode: 14, modifiers: Hotkey.command | Hotkey.option | Hotkey.control, keyName: "E").display == "⌃⌥⌘E")
     }
 
+    @Test func keysPressedAsARealKeyboardSendsThem() {
+        // Mission Control is stored as ⌃Fn↑ (com.apple.symbolichotkeys 32: 126, 0x840000).
+        #expect(KeyAction.Shortcuts.missionControl.sendsFn && KeyAction.Shortcuts.missionControl.isArrow)
+        #expect(KeyAction.Shortcuts.appWindows.sendsFn)
+        #expect(Hotkey(keyCode: 105, keyName: "F13").sendsFn)
+        #expect(!Hotkey(keyCode: 105, keyName: "F13").isArrow)
+        #expect(!KeyAction.Shortcuts.back.sendsFn)
+        #expect(!Hotkey(keyCode: 0x30, modifiers: Hotkey.control, keyName: "⇥").sendsFn)
+    }
+
     @Test func preciseVolumeSpeedsUpWithTheKnob() {
         #expect(VolumeAcceleration.step(after: nil) == 0.01)
         #expect(VolumeAcceleration.step(after: 0.03) == 0.08)

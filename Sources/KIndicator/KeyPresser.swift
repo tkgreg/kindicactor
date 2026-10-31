@@ -71,6 +71,9 @@ enum KeyPresser {
         if modifiers.contains(.option) { flags.insert(.maskAlternate) }
         if modifiers.contains(.control) { flags.insert(.maskControl) }
         if modifiers.contains(.shift) { flags.insert(.maskShift) }
+        // As a real keyboard sends them, or the system's shortcuts (Mission Control) don't match.
+        if hotkey.sendsFn { flags.insert(.maskSecondaryFn) }
+        if hotkey.isArrow { flags.insert(.maskNumericPad) }
         for isDown in [true, false] {
             guard let event = CGEvent(keyboardEventSource: source, virtualKey: hotkey.keyCode, keyDown: isDown) else {
                 log.error("can't make key \(hotkey.display, privacy: .public)")
