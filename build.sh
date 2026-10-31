@@ -18,8 +18,14 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp LICENSE "$APP/Contents/Resources/LICENSE"
 
-# A stable signing identity keeps the login item valid across rebuilds; fall back to ad-hoc.
-IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning | awk -F'"' '/Apple Development/ { print $2; exit }')}"
+# A stable signing identity keeps the login item and macOS's permissions (Accessibility) valid
+# across rebuilds. The releases' Developer ID first, so they also carry over between a local
+# build and a release; else Apple Development; else ad-hoc.
+find_identity() {
+    security find-identity -v -p codesigning | awk -F'"' -v p="$1" 'index($2, p) { print $2; exit }'
+}
+IDENTITY="${SIGN_IDENTITY:-$(find_identity "Developer ID Application")}"
+IDENTITY="${IDENTITY:-$(find_identity "Apple Development")}"
 codesign --force --sign "${IDENTITY:--}" "$APP"
 echo "Built $APP (signed with: ${IDENTITY:-ad-hoc})"
 

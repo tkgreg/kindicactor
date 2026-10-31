@@ -118,7 +118,7 @@ cable or Bluetooth.
 ## Build from source
 
 ```bash
-./build.sh --install     # build, sign with your Apple Development identity, install and launch
+./build.sh --install     # build, sign (Developer ID, else Apple Development), install and launch
 ./release.sh             # universal build, Developer ID signing, notarized DMG in dist/
 swift test               # tests of KIndicatorCore
 ```
