@@ -37,6 +37,7 @@ final class AppSettings: ObservableObject {
         static let launchActions = "launchActions"
         static let knobControl = "knobControl"
         static let mouseControl = "mouseControl"
+        static let smoothScrolling = "smoothScrolling"
     }
 
     private let defaults = UserDefaults.standard
@@ -81,6 +82,9 @@ final class AppSettings: ObservableObject {
     @Published var mouseControl: MouseControl {
         didSet { defaults.set(try? JSONEncoder().encode(mouseControl), forKey: Key.mouseControl) }
     }
+    @Published var smoothScrolling: SmoothScrolling {
+        didSet { defaults.set(try? JSONEncoder().encode(smoothScrolling), forKey: Key.smoothScrolling) }
+    }
 
     init() {
         layerNames = defaults.stringArray(forKey: Key.layerNames) ?? Self.defaultLayerNames
@@ -103,6 +107,8 @@ final class AppSettings: ObservableObject {
             .flatMap { try? JSONDecoder().decode(KnobControl.self, from: $0) } ?? KnobControl()
         mouseControl = defaults.data(forKey: Key.mouseControl)
             .flatMap { try? JSONDecoder().decode(MouseControl.self, from: $0) } ?? MouseControl()
+        smoothScrolling = defaults.data(forKey: Key.smoothScrolling)
+            .flatMap { try? JSONDecoder().decode(SmoothScrolling.self, from: $0) } ?? SmoothScrolling()
     }
 
     var hasLayerLighting: Bool { layerLighting.contains { $0 != nil } }

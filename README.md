@@ -46,6 +46,13 @@ KIndicator reads the active layer from the keyboard and shows it in the menu bar
   mice send F13 and the like) gets actions too: e.g. F13 for Mission Control. A button with
   a double-click action waits a moment after a click (0.3 s, adjustable) to see whether a
   second one follows; the others act at once. Needs Accessibility permission.
+- **Smooth scrolling.** A mouse wheel's notches glide like a trackpad's: set the
+  distance per notch, the glide and how much faster a fast spin goes. It feels the same on
+  a 60 Hz and a 120 Hz screen, scrolls exactly the distance asked, stops at once when the
+  wheel turns back or you click, and leaves trackpads and the Magic Mouse alone. ⇧ scrolls
+  sideways, a key of your choice scrolls faster, another (⌘) scrolls without smoothing so
+  ⌘-scroll zooms as usual; apps of your choice keep the wheel's own scrolling. Needs
+  Accessibility permission.
 - **Lighting from the menu.** Switch the keyboard's effect (Breathing, Per-key RGB,
   Off, …) without opening Keychron Launcher.
 - **Launch actions.** One global shortcut switches the input language, then opens
@@ -57,8 +64,8 @@ KIndicator reads the active layer from the keyboard and shows it in the menu bar
 - **Plays nice with Keychron Launcher.** Pauses automatically while Launcher is
   open, so the two apps don't confuse the keyboard.
 - **Lightweight.** Starts at login, lives in the menu bar, needs no special
-  permissions (no Input Monitoring; Accessibility only for Knob Control and mouse
-  buttons).
+  permissions (no Input Monitoring; Accessibility only for Knob Control, mouse buttons
+  and smooth scrolling).
 
 ![Launch actions: shortcut, input source and app](docs/launch-actions.png)
 
@@ -159,7 +166,14 @@ middle, Back and Forward buttons: a click with an action runs it instead of reac
 app; a press of a button with a double-click action is held back until the double-click
 time runs out, then runs the click's action or is sent on as it was, and a second press
 within it runs the double-click action instead. Keys a mouse sends for its own buttons are
-caught as global hotkeys, like the knob's. The mic indicator asks Core Audio which processes are recording
+caught as global hotkeys, like the knob's.
+
+Smooth scrolling runs on a thread of its own, so a busy app never holds up scrolling: an
+event tap takes each wheel notch (events that are continuous or carry phases, from
+trackpads and the like, pass untouched), and each notch adds distance to a critically
+damped spring, solved exactly over each frame's real time and timed by the display link
+of the screen under the pointer. Fractions of a pixel carry over, so every notch scrolls
+exactly its distance; each frame is posted as a fresh continuous pixel event. The mic indicator asks Core Audio which processes are recording
 (`kAudioProcessPropertyIsRunningInput`); it records nothing, so it needs no
 microphone permission either. Room brightness reads the ambient light sensor once a
 second through IOKit's HID event system (falling back to the sensor's `CurrentLux` in
