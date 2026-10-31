@@ -67,7 +67,7 @@ final class HotkeyCenter {
 
     /// Who the hotkeys are for; each sets its own.
     enum Group: CaseIterable {
-        case launchActions, knob
+        case launchActions, knob, mouse
     }
 
     typealias Binding = (hotkey: Hotkey, action: () -> Void)

@@ -2,64 +2,89 @@ import AppKit
 import KIndicatorCore
 import SwiftUI
 
-/// A device's actions per app: a row for all apps, then one per app added, with a menu per
-/// input. An app's inputs left to the all-apps action show it dimmed.
+/// A device's actions per app: rows for all apps, then rows for each app added, with a menu
+/// per input. An app's inputs left to the all-apps action show it dimmed.
 struct AppActionsGrid<Mapping: ActionMapping>: View {
-    /// The columns: each input and its heading.
-    let inputs: [(input: Mapping.Input, title: String)]
+    /// Column headings, and what Nothing means in each column.
+    let columns: [(title: String, nothing: String)]
+    /// An app's rows: a heading when there are several, then an input per column.
+    let rows: [(title: String?, inputs: [Mapping.Input])]
+    /// The heading over the rows' headings.
+    var rowsTitle = ""
     @Binding var allApps: Mapping
     @Binding var apps: [AppActions<Mapping>]
-    /// Whole mappings to fill a row with; none hides the presets menu.
+    /// Whole mappings to fill an app's rows with; none hides the presets menu.
     var presets: [(name: String, mapping: Mapping)] = []
+
+    private var hasRowTitles: Bool { rows.contains { $0.title != nil } }
 
     var body: some View {
         Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 12) {
             GridRow {
                 Text("App")
-                ForEach(inputs.indices, id: \.self) { index in
-                    Text(inputs[index].title)
+                if hasRowTitles { Text(rowsTitle) }
+                ForEach(columns.indices, id: \.self) { index in
+                    Text(columns[index].title)
                 }
             }
             .font(.caption.weight(.medium))
             .foregroundStyle(.secondary)
-            GridRow {
+            appRows(mapping: $allApps, forApp: false) {
                 Label("All Apps", systemImage: "square.grid.2x2")
-                    .frame(width: 120, alignment: .leading)
-                ForEach(inputs.indices, id: \.self) { index in
-                    KeyActionMenu(action: actionBinding($allApps, inputs[index].input), inherited: nil)
-                }
-                if !presets.isEmpty {
-                    presetMenu($allApps, forApp: false)
-                }
-            }
+            } remove: {}
             ForEach($apps) { $app in
-                GridRow {
+                if hasRowTitles { Divider() }
+                appRows(mapping: $app.mapping, forApp: true) {
                     Label {
                         Text(app.name).lineLimit(1)
                     } icon: {
                         Image(nsImage: Self.icon(app))
                     }
-                    .frame(width: 120, alignment: .leading)
                     .help(app.bundleID)
-                    ForEach(inputs.indices, id: \.self) { index in
-                        KeyActionMenu(action: actionBinding($app.mapping, inputs[index].input),
-                                      inherited: allApps[inputs[index].input] ?? .nothing)
-                    }
-                    if !presets.isEmpty {
-                        presetMenu($app.mapping, forApp: true)
-                    }
-                    Button {
-                        apps.removeAll { $0.id == app.id }
-                    } label: {
-                        Image(systemName: "minus.circle.fill")
-                    }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(.secondary)
-                    .help("Remove")
+                } remove: {
+                    apps.removeAll { $0.id == app.id }
                 }
             }
         }
         addAppMenu
+    }
+
+    /// An app's rows: its name, presets and remove button on the first.
+    private func appRows<AppLabel: View>(mapping: Binding<Mapping>, forApp: Bool, @ViewBuilder label: () -> AppLabel,
+                                         remove: @escaping () -> Void) -> some View {
+        let label = label()
+        return ForEach(rows.indices, id: \.self) { row in
+            GridRow {
+                if row == 0 {
+                    label.frame(width: 120, alignment: .leading)
+                } else {
+                    Text("")
+                }
+                if hasRowTitles {
+                    Text(rows[row].title ?? "")
+                        .frame(minWidth: 60, alignment: .leading)
+                }
+                ForEach(rows[row].inputs.indices, id: \.self) { column in
+                    let input = rows[row].inputs[column]
+                    KeyActionMenu(action: actionBinding(mapping, input),
+                                  inherited: forApp ? allApps[input] ?? .nothing : nil,
+                                  nothingTitle: columns[column].nothing)
+                }
+                if row == 0 {
+                    if !presets.isEmpty {
+                        presetMenu(mapping, forApp: forApp)
+                    }
+                    if forApp {
+                        Button(action: remove) {
+                            Image(systemName: "minus.circle.fill")
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .help("Remove")
+                    }
+                }
+            }
+        }
     }
 
     /// Fills all of a row's actions; an app's can go back to the ones for all apps.
@@ -147,6 +172,8 @@ struct KeyActionMenu: View {
     @Binding var action: KeyAction?
     /// The action for all apps, in an app's menu; nil in the all-apps one.
     let inherited: KeyAction?
+    /// What Nothing means here, e.g. Click as Usual.
+    var nothingTitle = "Nothing"
     @State private var capture = ShortcutCapture()
 
     private static let sections: [(title: String, keys: [MediaKey])] = [
@@ -162,10 +189,10 @@ struct KeyActionMenu: View {
             } else {
                 Menu {
                     if let inherited {
-                        check("Same as All Apps (\(inherited.title))", action == nil) { action = nil }
+                        check("Same as All Apps (\(title(inherited)))", action == nil) { action = nil }
                         Divider()
                     }
-                    check("Nothing", action == .nothing) { action = .nothing }
+                    check(nothingTitle, action == .nothing) { action = .nothing }
                     ForEach(Self.sections, id: \.title) { section in
                         Section(section.title) {
                             ForEach(section.keys, id: \.self) { key in
@@ -173,19 +200,30 @@ struct KeyActionMenu: View {
                             }
                         }
                     }
+                    Section("Shortcuts") {
+                        ForEach(KeyAction.Shortcuts.all, id: \.name) { shortcut in
+                            check("\(shortcut.name) (\(shortcut.hotkey.display))", action == .shortcut(shortcut.hotkey)) {
+                                action = .shortcut(shortcut.hotkey)
+                            }
+                        }
+                    }
                     Divider()
-                    if case .shortcut(let hotkey) = action {
+                    if case .shortcut(let hotkey) = action, !KeyAction.Shortcuts.all.contains(where: { $0.hotkey == hotkey }) {
                         check(hotkey.display, true) {}
                     }
                     Button("Record Shortcut…", action: record)
                 } label: {
-                    Text((action ?? inherited ?? .nothing).title)
+                    Text(title(action ?? inherited ?? .nothing))
                 }
                 .opacity(action == nil && inherited != nil ? 0.55 : 1)
             }
         }
         .frame(width: 140)
         .onDisappear(perform: capture.stop)
+    }
+
+    private func title(_ action: KeyAction) -> String {
+        action == .nothing ? nothingTitle : action.title
     }
 
     private func record() {

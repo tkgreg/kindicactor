@@ -37,8 +37,26 @@ package enum KeyAction: Codable, Hashable, Sendable {
         switch self {
         case .nothing: "Nothing"
         case .media(let key): key.title
-        case .shortcut(let hotkey): hotkey.display
+        case .shortcut(let hotkey): Shortcuts.all.first { $0.hotkey == hotkey }?.name ?? hotkey.display
         }
+    }
+
+    /// Shortcuts most apps share, offered by name. Virtual key codes: kVK_ANSI_LeftBracket,
+    /// kVK_ANSI_RightBracket, kVK_ANSI_W, kVK_ANSI_T, kVK_UpArrow, kVK_DownArrow.
+    package enum Shortcuts {
+        package static let back = Hotkey(keyCode: 0x21, modifiers: Hotkey.command, keyName: "[")
+        package static let forward = Hotkey(keyCode: 0x1E, modifiers: Hotkey.command, keyName: "]")
+        package static let closeWindow = Hotkey(keyCode: 0x0D, modifiers: Hotkey.command, keyName: "W")
+        package static let newTab = Hotkey(keyCode: 0x11, modifiers: Hotkey.command, keyName: "T")
+        package static let reopenTab = Hotkey(keyCode: 0x11, modifiers: Hotkey.command | Hotkey.shift, keyName: "T")
+        /// The system's default shortcuts for these, in Keyboard Shortcuts › Mission Control.
+        package static let missionControl = Hotkey(keyCode: 0x7E, modifiers: Hotkey.control, keyName: "↑")
+        package static let appWindows = Hotkey(keyCode: 0x7D, modifiers: Hotkey.control, keyName: "↓")
+
+        package static let all: [(name: String, hotkey: Hotkey)] = [
+            ("Back", back), ("Forward", forward), ("Close Window", closeWindow), ("New Tab", newTab),
+            ("Reopen Closed Tab", reopenTab), ("Mission Control", missionControl), ("App Windows", appWindows),
+        ]
     }
 
     /// How many times to press for one click of the knob, `interval` seconds after the click

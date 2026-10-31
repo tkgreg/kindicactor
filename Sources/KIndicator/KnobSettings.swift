@@ -39,7 +39,8 @@ struct KnobSettings: View {
             SettingsNote(text: status)
         }
         SettingsGroup(title: "Actions") {
-            AppActionsGrid(inputs: [(.turnLeft, "Turn Left"), (.turnRight, "Turn Right"), (.press, "Press")],
+            AppActionsGrid(columns: [("Turn Left", "Nothing"), ("Turn Right", "Nothing"), ("Press", "Nothing")],
+                           rows: [(nil, [.turnLeft, .turnRight, .press])],
                            allApps: $settings.knobControl.allApps, apps: $settings.knobControl.apps,
                            presets: KnobPreset.all.map { ($0.name, $0.mapping) })
             SettingsNote(text: "Precise Volume changes the volume in quarter steps, as the volume keys do with ⌥⇧ held, and speeds up while you spin the knob: from one quarter step (about 1.6%) a click when turned slowly up to five (about 8%). An app's dimmed actions are the ones for all apps. Shortcuts are pressed in the frontmost app.")

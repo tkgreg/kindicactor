@@ -6,13 +6,14 @@ import OSLog
 
 private let log = Logger(subsystem: "local.kindicator", category: "mouse")
 
-/// Mouse double-clicks. While on, an event tap sees every mouse's Back and Forward presses
-/// (buttons 3 and 4); `DoubleClick` decides which to hold back, which to send on and when a
+/// Mouse buttons. While on, an event tap sees every mouse's middle, Back and Forward presses
+/// (buttons 2-4), and keys a mouse sends for buttons of its own (e.g. F13) come as global
+/// hotkeys. `DoubleClick` decides which to hold back, which to send on and when a click or a
 /// double-click runs the frontmost app's action. A tap that can hold events back needs
-/// Accessibility permission, as pressing the action's keys does.
+/// Accessibility permission, as pressing the action's keys does; hotkeys need none.
 @MainActor
 final class MouseController: ObservableObject {
-    /// Whether the side buttons are being watched; false while off or not allowed.
+    /// Whether the buttons are being watched; false while off or not allowed.
     @Published private(set) var isWatching = false
 
     /// Marks the clicks KIndicator sends on, so the tap lets them through.
@@ -33,6 +34,28 @@ final class MouseController: ObservableObject {
         settings.$mouseControl.map(\.enabled).removeDuplicates()
             .sink { [weak self] in self?.refresh(enabled: $0) }
             .store(in: &subscriptions)
+        settings.$mouseControl.map { $0.enabled ? $0.keys : [] }.removeDuplicates()
+            .sink { [weak self] in self?.listen(for: $0) }
+            .store(in: &subscriptions)
+    }
+
+    /// The mouse's keys as global hotkeys while on.
+    private func listen(for keys: [Hotkey]) {
+        HotkeyCenter.shared.set(keys.map { key -> HotkeyCenter.Binding in
+            (hotkey: key, action: { [weak self] in self?.pressed(key) })
+        }, for: .mouse)
+    }
+
+    /// A key arrives pressed and released at once; it's never sent on.
+    private func pressed(_ key: Hotkey) {
+        // Rare enough to log: shows whether the mouse's key arrives at all.
+        log.notice("mouse key \(key.display, privacy: .public) pressed")
+        let button = MouseButton.key(key)
+        clicks.interval = settings.mouseControl.doubleClickInterval
+        let actions = settings.mouseControl.actions(for: button, app: Self.frontmostApp)
+        perform(clicks.handle(button, isDown: true, at: Self.now, actions: actions).effects)
+        perform(clicks.handle(button, isDown: false, at: Self.now, actions: actions).effects)
+        scheduleTimeout()
     }
 
     /// Starts or stops watching; also when Accessibility may have been allowed meanwhile.
@@ -68,7 +91,7 @@ final class MouseController: ObservableObject {
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         self.tap = tap
         tapSource = source
-        log.notice("watching the mouse's Back and Forward buttons")
+        log.notice("watching the mouse's middle, Back and Forward buttons")
     }
 
     private func stopTap() {
@@ -100,10 +123,9 @@ final class MouseController: ObservableObject {
               let button = MouseButton(buttonNumber: event.getIntegerValueField(.mouseEventButtonNumber))
         else { return true }
 
-        let isDown = type == .otherMouseDown
         clicks.interval = settings.mouseControl.doubleClickInterval
-        let wanted = isDown && settings.mouseControl.action(for: button, app: Self.frontmostApp) != .nothing
-        let (pass, effects) = clicks.handle(button, isDown: isDown, at: Self.now, wanted: wanted)
+        let actions = settings.mouseControl.actions(for: button, app: Self.frontmostApp)
+        let (pass, effects) = clicks.handle(button, isDown: type == .otherMouseDown, at: Self.now, actions: actions)
         perform(effects)
         scheduleTimeout()
         return pass
@@ -126,22 +148,32 @@ final class MouseController: ObservableObject {
             case .replay(let button, let released):
                 send(button, isDown: true)
                 if released { send(button, isDown: false) }
-            case .run(let button):
-                let action = settings.mouseControl.action(for: button, app: Self.frontmostApp)
-                log.debug("double-click \(button.rawValue, privacy: .public): \(action.title, privacy: .public)")
-                KeyPresser.perform(action)
+            case .click(let button):
+                run(.click(button))
+            case .doubleClick(let button):
+                run(.doubleClick(button))
             }
         }
     }
 
-    /// Sends on a press or release held back, where the pointer is now.
+    private func run(_ input: MouseInput) {
+        let action = settings.mouseControl.action(for: input, app: Self.frontmostApp)
+        log.debug("\(String(describing: input), privacy: .public): \(action.title, privacy: .public)")
+        // Pressing a key KIndicator listens for would come back here, or go round with the knob's.
+        if case .shortcut(let hotkey) = action,
+           settings.mouseControl.keys.contains(hotkey) || KnobController.isKnobKey(hotkey) { return }
+        KeyPresser.perform(action)
+    }
+
+    /// Sends on a press or release held back, where the pointer is now. A key isn't sent on.
     private func send(_ button: MouseButton, isDown: Bool) {
+        guard let number = button.buttonNumber else { return }
         let location = CGEvent(source: nil)?.location ?? .zero
         guard let event = CGEvent(mouseEventSource: nil, mouseType: isDown ? .otherMouseDown : .otherMouseUp,
                                   mouseCursorPosition: location,
-                                  mouseButton: CGMouseButton(rawValue: UInt32(button.buttonNumber)) ?? .center)
+                                  mouseButton: CGMouseButton(rawValue: UInt32(number)) ?? .center)
         else { return }
-        event.setIntegerValueField(.mouseEventButtonNumber, value: button.buttonNumber)
+        event.setIntegerValueField(.mouseEventButtonNumber, value: number)
         event.setIntegerValueField(.mouseEventClickState, value: 1)
         event.setIntegerValueField(.eventSourceUserData, value: Self.replayMark)
         event.post(tap: .cghidEventTap)
