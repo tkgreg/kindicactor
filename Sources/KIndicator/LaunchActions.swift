@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import KIndicatorCore
 import OSLog
 
 private let log = Logger(subsystem: "local.kindicator", category: "launch")
@@ -45,7 +46,7 @@ final class LaunchActionRunner {
             action.hotkey.map { hotkey in
                 (hotkey: hotkey, action: { [weak self] in self?.run(action) })
             }
-        })
+        }, for: .launchActions)
     }
 
     private func run(_ action: LaunchAction) {

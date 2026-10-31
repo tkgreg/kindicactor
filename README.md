@@ -33,6 +33,12 @@ KIndicator reads the active layer from the keyboard and shows it in the menu bar
   layer. Works with the Per-key RGB effect; a layer set to Solid Color is drawn key by
   key meanwhile, so the key shows there too. Nothing is saved on the keyboard, and it
   needs no microphone permission.
+- **Knob Control.** Turn and press the knob for volume, precise volume (quarter steps,
+  as the volume keys do with ⌥⇧), tracks, display brightness or any shortcut, with
+  different actions in different apps. Keychron Launcher can't put macros on the knob,
+  so KIndicator sets it to send F18, F19 and F20 (on the layers you pick, saved on the
+  keyboard) and turns those into your actions. Turning it off gives the knob its own
+  keys back. Needs Accessibility permission, to press the keys.
 - **Lighting from the menu.** Switch the keyboard's effect (Breathing, Per-key RGB,
   Off, …) without opening Keychron Launcher.
 - **Launch actions.** One global shortcut switches the input language, then opens
@@ -44,7 +50,7 @@ KIndicator reads the active layer from the keyboard and shows it in the menu bar
 - **Plays nice with Keychron Launcher.** Pauses automatically while Launcher is
   open, so the two apps don't confuse the keyboard.
 - **Lightweight.** Starts at login, lives in the menu bar, needs no special
-  permissions (no Input Monitoring, no Accessibility).
+  permissions (no Input Monitoring; Accessibility only for Knob Control).
 
 ![Launch actions: shortcut, input source and app](docs/launch-actions.png)
 
@@ -69,6 +75,9 @@ Items**; you can turn that off in **Settings › General**.
    layer.
 4. Optional: in **Settings › Launch Actions** add a shortcut, then in Keychron
    Launcher set a key's macro to press it.
+5. Optional: in **Settings › Knob** turn on Knob Control, allow KIndicator in
+   **System Settings › Privacy & Security › Accessibility**, and pick what the knob does
+   in all apps and in single apps.
 
 ## Compatibility
 
@@ -121,6 +130,10 @@ Keychron's ZMK firmware exposes the same raw HID channel Keychron Launcher uses
 - `0xA8 0x09` / `0xA8 0x0A` get and set the colours of up to 9 keys in Per-key RGB
   mode, as Keychron Launcher does. Launcher then saves with `0xA8 0x02`; KIndicator
   never does, so the mic indicator's colour stays in the keyboard's memory.
+- VIA's `0x14` / `0x15` get and set what turning the knob sends on a layer, and `0x04` /
+  `0x05` what a key sends (pressing the knob is a key of the matrix). Knob Control writes
+  F18, F19 and F20 with them, which the keyboard saves as when set in Keychron Launcher,
+  and writes the knob's own keys back when turned off.
 - VIA's `0x12` reads the keymap, and `0xA8 0x06` the LED behind each key, for the
   keyboard drawing. Its layout comes from Keychron Launcher's definitions, bundled
   for the V6 Ultra 8K ANSI, ISO and JIS (`Tools/make-layouts.swift` regenerates them).
@@ -131,7 +144,9 @@ Keychron's ZMK firmware exposes the same raw HID channel Keychron Launcher uses
   (e.g. Keychron Launcher in a browser) has the channel open.
 
 Launch actions use Carbon hotkeys and the Text Input Sources API, which need no
-permissions. The mic indicator asks Core Audio which processes are recording
+permissions. Knob Control listens for F18-F20 the same way, and presses media keys as
+system-defined events (with ⌥⇧ for precise volume) and shortcuts as key events, which
+macOS allows only with Accessibility permission. The mic indicator asks Core Audio which processes are recording
 (`kAudioProcessPropertyIsRunningInput`); it records nothing, so it needs no
 microphone permission either. Room brightness reads the ambient light sensor once a
 second through IOKit's HID event system (falling back to the sensor's `CurrentLux` in

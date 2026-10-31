@@ -1,17 +1,12 @@
 import AppKit
 import Carbon
+import KIndicatorCore
 import OSLog
 
 private let log = Logger(subsystem: "local.kindicator", category: "hotkeys")
 
-/// A global keyboard shortcut: a key plus modifiers, with the name to show for the key.
-struct Hotkey: Codable, Equatable {
-    var keyCode: UInt16
-    /// `NSEvent.ModifierFlags` raw value: command, option, control and shift only.
-    var modifiers: UInt
-    var keyName: String
-
-    /// Plain keys would steal typing, so only these may be used without a modifier.
+extension Hotkey {
+    /// Plain keys would steal typing, so only these may be listened for without a modifier.
     private static let functionKeys: [Int: String] = [
         kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4", kVK_F5: "F5", kVK_F6: "F6",
         kVK_F7: "F7", kVK_F8: "F8", kVK_F9: "F9", kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12",
@@ -25,19 +20,18 @@ struct Hotkey: Codable, Equatable {
         kVK_Home: "↖", kVK_End: "↘", kVK_PageUp: "⇞", kVK_PageDown: "⇟",
     ]
 
-    init?(event: NSEvent) {
+    /// `allowsPlainKeys` for a shortcut KIndicator presses rather than listens for, e.g. → alone.
+    init?(event: NSEvent, allowsPlainKeys: Bool = false) {
         let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
         let code = Int(event.keyCode)
-        guard !flags.isEmpty || Self.functionKeys[code] != nil else { return nil }
-        keyCode = event.keyCode
-        modifiers = flags.rawValue
-        keyName = Self.functionKeys[code] ?? Self.specialKeys[code] ?? Self.character(for: event.keyCode) ?? "?"
+        guard allowsPlainKeys || !flags.isEmpty || Self.functionKeys[code] != nil else { return nil }
+        self.init(keyCode: event.keyCode, modifiers: flags.rawValue,
+                  keyName: Self.functionKeys[code] ?? Self.specialKeys[code] ?? Self.character(for: event.keyCode) ?? "?")
     }
 
-    var display: String {
-        let flags = NSEvent.ModifierFlags(rawValue: modifiers)
-        return (flags.contains(.control) ? "⌃" : "") + (flags.contains(.option) ? "⌥" : "")
-            + (flags.contains(.shift) ? "⇧" : "") + (flags.contains(.command) ? "⌘" : "") + keyName
+    /// An F-key alone, e.g. one the knob sends.
+    init(functionKey keyCode: Int) {
+        self.init(keyCode: UInt16(keyCode), keyName: Self.functionKeys[keyCode] ?? "?")
     }
 
     var carbonModifiers: UInt32 {
@@ -71,14 +65,24 @@ struct Hotkey: Codable, Equatable {
 final class HotkeyCenter {
     static let shared = HotkeyCenter()
 
-    private var bindings: [(hotkey: Hotkey, action: () -> Void)] = []
+    /// Who the hotkeys are for; each sets its own.
+    enum Group: CaseIterable {
+        case launchActions, knob
+    }
+
+    typealias Binding = (hotkey: Hotkey, action: () -> Void)
+
+    private var groups: [Group: [Binding]] = [:]
+    /// Every group's, in the order registered: a hotkey's ID is its index.
+    private var bindings: [Binding] = []
     private var registered: [EventHotKeyRef] = []
     private var handler: EventHandlerRef?
     private var suspended = false
 
-    /// Replaces all hotkeys.
-    func set(_ bindings: [(hotkey: Hotkey, action: () -> Void)]) {
-        self.bindings = bindings
+    /// Replaces the hotkeys of `group`.
+    func set(_ bindings: [Binding], for group: Group) {
+        groups[group] = bindings
+        self.bindings = Group.allCases.flatMap { groups[$0] ?? [] }
         if !suspended { registerAll() }
     }
 

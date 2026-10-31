@@ -3,13 +3,20 @@ import Foundation
 /// A request on the raw HID channel Keychron Launcher uses (usage page 0xFF60, usage 0x61,
 /// 32-byte reports). The reply starts with `replyHeader`, an echo of the request's start.
 ///
-/// The VIA commands (0x01-0x12) and Keychron's own (0xA1-0xB2) come from Keychron's ZMK;
+/// The VIA commands (0x01-0x15) and Keychron's own (0xA1-0xB2) come from Keychron's ZMK;
 /// 0x07-0x09 on channel 3 are VIA's RGB matrix values; 0xA8 is Keychron's per-key RGB group,
 /// sent the way Keychron Launcher sends it. Save for the per-key colours (0xA8 0x02) is
-/// deliberately missing: KIndicator's key colours stay in the keyboard's memory.
+/// deliberately missing: KIndicator's key colours stay in the keyboard's memory. Keymap
+/// changes (0x05, 0x15) are saved by the keyboard itself.
 package enum KeyboardRequest: Equatable, Sendable {
     case viaProtocolVersion
     case layerCount
+    /// What a key sends on a layer.
+    case getKeycode(layer: Int, KeyPosition)
+    case setKeycode(layer: Int, KeyPosition, UInt16)
+    /// What turning a knob sends on a layer; clockwise is to the right.
+    case getEncoder(layer: Int, encoder: UInt8, clockwise: Bool)
+    case setEncoder(layer: Int, encoder: UInt8, clockwise: Bool, UInt16)
     /// Up to 28 bytes of the keymap: big-endian keycodes, layer by layer, row by row.
     case keymapBuffer(offset: Int, size: Int)
     case firmwareVersion
@@ -47,6 +54,12 @@ package enum KeyboardRequest: Equatable, Sendable {
         switch self {
         case .viaProtocolVersion: [0x01]
         case .layerCount: [0x11]
+        case .getKeycode(let layer, let key): [0x04, UInt8(layer), UInt8(key.row), UInt8(key.col)]
+        case .setKeycode(let layer, let key, let keycode):
+            [0x05, UInt8(layer), UInt8(key.row), UInt8(key.col)] + Self.bigEndian(keycode)
+        case .getEncoder(let layer, let encoder, let clockwise): [0x14, UInt8(layer), encoder, clockwise ? 1 : 0]
+        case .setEncoder(let layer, let encoder, let clockwise, let keycode):
+            [0x15, UInt8(layer), encoder, clockwise ? 1 : 0] + Self.bigEndian(keycode)
         case .keymapBuffer(let offset, let size): [0x12, UInt8(offset >> 8), UInt8(offset & 0xFF), UInt8(size)]
         case .firmwareVersion: [0xA1]
         case .activeLayer: [0xA3]
@@ -68,6 +81,7 @@ package enum KeyboardRequest: Equatable, Sendable {
     package var replyHeader: [UInt8] {
         switch self {
         case .viaProtocolVersion, .layerCount, .firmwareVersion, .activeLayer, .receiverState: Array(bytes.prefix(1))
+        case .getKeycode, .setKeycode, .getEncoder, .setEncoder: Array(bytes.prefix(4))
         case .keymapBuffer, .getLighting, .setEffect, .setBrightness, .setSpeed, .setColor: Array(bytes.prefix(3))
         case .saveLighting, .ledNumbers, .getKeyColors, .setKeyColors: Array(bytes.prefix(2))
         }
@@ -75,6 +89,10 @@ package enum KeyboardRequest: Equatable, Sendable {
 
     private static func set(_ value: LightingValue, _ data: [UInt8]) -> [UInt8] {
         [0x07, rgbMatrixChannel, value.rawValue] + data
+    }
+
+    private static func bigEndian(_ keycode: UInt16) -> [UInt8] {
+        [UInt8(keycode >> 8), UInt8(keycode & 0xFF)]
     }
 }
 
@@ -116,6 +134,12 @@ package enum KeyboardReply {
     package static func lightingValue(_ reply: [UInt8]) -> [UInt8]? {
         guard reply.count >= 5, reply[0] == 0x08 else { return nil }
         return Array(reply[3...])
+    }
+
+    /// The keycode in a reply to `getKeycode` or `getEncoder`, after the 4-byte echo.
+    package static func keycode(_ reply: [UInt8]) -> UInt16? {
+        guard reply.count >= 6, reply[0] == 0x04 || reply[0] == 0x14 else { return nil }
+        return UInt16(reply[4]) << 8 | UInt16(reply[5])
     }
 
     package static func keymapChunk(_ reply: [UInt8], size: Int) -> [UInt8]? {

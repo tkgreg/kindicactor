@@ -35,6 +35,7 @@ final class AppSettings: ObservableObject {
         static let micIndicator = "micIndicator"
         static let roomBrightness = "roomBrightness"
         static let launchActions = "launchActions"
+        static let knobControl = "knobControl"
     }
 
     private let defaults = UserDefaults.standard
@@ -73,6 +74,9 @@ final class AppSettings: ObservableObject {
     @Published var launchActions: [LaunchAction] {
         didSet { defaults.set(try? JSONEncoder().encode(launchActions), forKey: Key.launchActions) }
     }
+    @Published var knobControl: KnobControl {
+        didSet { defaults.set(try? JSONEncoder().encode(knobControl), forKey: Key.knobControl) }
+    }
 
     init() {
         layerNames = defaults.stringArray(forKey: Key.layerNames) ?? Self.defaultLayerNames
@@ -91,6 +95,8 @@ final class AppSettings: ObservableObject {
             .flatMap { try? JSONDecoder().decode(RoomBrightness.self, from: $0) } ?? RoomBrightness()
         launchActions = defaults.data(forKey: Key.launchActions)
             .flatMap { try? JSONDecoder().decode([LaunchAction].self, from: $0) } ?? []
+        knobControl = defaults.data(forKey: Key.knobControl)
+            .flatMap { try? JSONDecoder().decode(KnobControl.self, from: $0) } ?? KnobControl()
     }
 
     var hasLayerLighting: Bool { layerLighting.contains { $0 != nil } }

@@ -14,6 +14,12 @@ struct KeyboardProtocolTests {
         #expect(KeyboardRequest.getKeyColors(first: 5, count: 9).bytes == [0xA8, 0x09, 5, 9])
         let red = KeyColor(hue: 0, saturation: 255, value: 255)
         #expect(KeyboardRequest.setKeyColors(first: 0, [red]).bytes == [0xA8, 0x0A, 0, 1, 0, 255, 255])
+        let knob = KeyPosition(row: 0, col: 13)
+        #expect(KeyboardRequest.getKeycode(layer: 1, knob).bytes == [0x04, 1, 0, 13])
+        #expect(KeyboardRequest.setKeycode(layer: 0, knob, 0x006F).bytes == [0x05, 0, 0, 13, 0x00, 0x6F])
+        #expect(KeyboardRequest.getEncoder(layer: 2, encoder: 0, clockwise: true).bytes == [0x14, 2, 0, 1])
+        #expect(KeyboardRequest.setEncoder(layer: 0, encoder: 0, clockwise: false, 0x7828).bytes
+            == [0x15, 0, 0, 0, 0x78, 0x28])
     }
 
     @Test func replyHeaders() {
@@ -22,6 +28,8 @@ struct KeyboardProtocolTests {
         #expect(KeyboardRequest.keymapBuffer(offset: 28, size: 28).replyHeader == [0x12, 0x00, 28])
         #expect(KeyboardRequest.saveLighting.replyHeader == [0x09, 0x03])
         #expect(KeyboardRequest.setKeyColors(first: 0, []).replyHeader == [0xA8, 0x0A])
+        #expect(KeyboardRequest.getEncoder(layer: 1, encoder: 0, clockwise: false).replyHeader == [0x14, 1, 0, 0])
+        #expect(KeyboardRequest.setKeycode(layer: 0, KeyPosition(row: 0, col: 13), 0x6F).replyHeader == [0x05, 0, 0, 13])
     }
 
     @Test func decodesReplies() {
@@ -36,6 +44,11 @@ struct KeyboardProtocolTests {
         #expect(KeyboardReply.keyColors([0xA8, 0x09, 0, 208, 255, 255], count: 1) == [KeyColor(hue: 208, saturation: 255, value: 255)])
         #expect(KeyboardReply.keyColors([0xA8, 0x09, 0, 208], count: 1) == nil)
         #expect(KeyboardReply.keymapChunk([0x12, 0, 0, 2, 0x00, 0x29], size: 2) == [0x00, 0x29])
+        // The knob on the Fn layer: turned left dims the lighting, pressed toggles it.
+        #expect(KeyboardReply.keycode([0x14, 0x01, 0x00, 0x00, 0x78, 0x28, 0, 0]) == 0x7828)
+        #expect(KeyboardReply.keycode([0x04, 0x01, 0x00, 0x0D, 0x78, 0x20, 0, 0]) == 0x7820)
+        #expect(KeyboardReply.keycode([0x15, 0x01, 0x00, 0x00, 0x78, 0x28]) == nil)
+        #expect(KeyboardReply.keycode([0x14, 0x01, 0x00, 0x00]) == nil)
     }
 
     @Test func decodesLEDNumbers() {
