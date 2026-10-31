@@ -82,7 +82,7 @@ struct KnobSettings: View {
                 }
             }
             addAppMenu
-            SettingsNote(text: "Precise Volume changes the volume in quarter steps, as the volume keys do with ⌥⇧ held. An app's dimmed actions are the ones for all apps. Shortcuts are pressed in the frontmost app.")
+            SettingsNote(text: "Precise Volume changes the volume in quarter steps, as the volume keys do with ⌥⇧ held, and speeds up while you spin the knob: from one quarter step (about 1.6%) a click when turned slowly up to five (about 8%). An app's dimmed actions are the ones for all apps. Shortcuts are pressed in the frontmost app.")
         }
         .disabled(!settings.knobControl.enabled)
         // Turned on in System Settings meanwhile.

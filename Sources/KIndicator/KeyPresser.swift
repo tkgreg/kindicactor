@@ -21,11 +21,13 @@ enum KeyPresser {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
     }
 
-    static func perform(_ action: KnobAction) {
-        switch action {
-        case .nothing: break
-        case .media(let key): press(key)
-        case .shortcut(let hotkey): press(hotkey)
+    static func perform(_ action: KnobAction, times: Int = 1) {
+        for _ in 0..<times {
+            switch action {
+            case .nothing: break
+            case .media(let key): press(key)
+            case .shortcut(let hotkey): press(hotkey)
+            }
         }
     }
 

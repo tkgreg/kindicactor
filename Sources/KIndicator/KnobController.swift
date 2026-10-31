@@ -39,6 +39,8 @@ final class KnobController: ObservableObject {
     private let monitor: KeyboardMonitor
     private let settings: AppSettings
     private let maps: KeyboardMaps
+    /// The knob's last click, to time the next one in the same direction.
+    private var lastClick: (input: KnobInput, at: ContinuousClock.Instant)?
     private var syncing: Task<Void, Never>?
     private var syncAgain = false
     private var subscriptions: Set<AnyCancellable> = []
@@ -99,11 +101,18 @@ final class KnobController: ObservableObject {
     }
 
     private func handle(_ input: KnobInput) {
+        let now = ContinuousClock.now
+        // Turning the other way starts slow again, for fine-tuning.
+        let interval = lastClick.flatMap { last in
+            last.input == input ? (now - last.at) / .seconds(1) : nil
+        }
+        lastClick = (input, now)
         let app = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let action = settings.knobControl.action(for: input, app: app)
-        log.debug("\(input.rawValue, privacy: .public) in \(app ?? "-", privacy: .public): \(action.title, privacy: .public)")
+        let presses = action.presses(after: interval)
+        log.debug("\(input.rawValue, privacy: .public) in \(app ?? "-", privacy: .public): \(action.title, privacy: .public) ×\(presses)")
         if case .shortcut(let hotkey) = action, Self.isKnobKey(hotkey) { return }
-        KeyPresser.perform(action)
+        KeyPresser.perform(action, times: presses)
         if !canPressKeys { refreshPermission() }
     }
 

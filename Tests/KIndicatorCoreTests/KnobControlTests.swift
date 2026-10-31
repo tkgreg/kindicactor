@@ -33,6 +33,22 @@ struct KnobControlTests {
         #expect(Hotkey(keyCode: 14, modifiers: Hotkey.command | Hotkey.option | Hotkey.control, keyName: "E").display == "⌃⌥⌘E")
     }
 
+    @Test func preciseVolumeSpeedsUpWithTheKnob() {
+        #expect(VolumeAcceleration.step(after: nil) == 0.01)
+        #expect(VolumeAcceleration.step(after: 0.03) == 0.08)
+        #expect(VolumeAcceleration.step(after: 0.04) == 0.04)
+        #expect(VolumeAcceleration.step(after: 0.099) == 0.04)
+        #expect(VolumeAcceleration.step(after: 0.15) == 0.02)
+        #expect(VolumeAcceleration.step(after: 0.2) == 0.01)
+        #expect([0.01, 0.02, 0.04, 0.08].map(VolumeAcceleration.quarterSteps) == [1, 1, 3, 5])
+        #expect(KnobAction.media(.preciseVolumeUp).presses(after: 0.02) == 5)
+        #expect(KnobAction.media(.preciseVolumeDown).presses(after: 0.05) == 3)
+        #expect(KnobAction.media(.preciseVolumeUp).presses(after: nil) == 1)
+        // Other actions press once per click, however fast.
+        #expect(KnobAction.media(.volumeUp).presses(after: 0.02) == 1)
+        #expect(KnobPreset.zoom.mapping.turnRight?.presses(after: 0.02) == 1)
+    }
+
     @Test func settingsSurviveEncoding() throws {
         let control = KnobControl(enabled: true, layers: [0, 2], allApps: KnobPreset.zoom.mapping,
                                   apps: [KnobAppMapping(bundleID: "a.b", name: "B", mapping: KnobPreset.tracks.mapping)])

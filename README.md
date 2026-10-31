@@ -34,7 +34,7 @@ KIndicator reads the active layer from the keyboard and shows it in the menu bar
   key meanwhile, so the key shows there too. Nothing is saved on the keyboard, and it
   needs no microphone permission.
 - **Knob Control.** Turn and press the knob for volume, precise volume (quarter steps,
-  as the volume keys do with ⌥⇧), tracks, display brightness or any shortcut, with
+  as the volume keys do with ⌥⇧, speeding up while you spin the knob), tracks, display brightness or any shortcut, with
   different actions in different apps. Keychron Launcher can't put macros on the knob,
   so KIndicator sets it to send F18, F19 and F20 (on the layers you pick, saved on the
   keyboard) and turns those into your actions. Turning it off gives the knob its own
