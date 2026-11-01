@@ -69,6 +69,8 @@ KIndicator reads the active layer from the keyboard and shows it in the menu bar
 
 ![Launch actions: shortcut, input source and app](docs/launch-actions.png)
 
+![Mouse: double-click, actions per app, smooth scrolling](docs/mouse.png)
+
 ## Download
 
 Get the latest `KIndicator-<version>.dmg` from
