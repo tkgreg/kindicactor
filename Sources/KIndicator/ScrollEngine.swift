@@ -153,7 +153,14 @@ final class ScrollEngine: NSObject, @unchecked Sendable {
 
         settings = lock.withLock { sharedSettings }
         let target = pid_t(truncatingIfNeeded: event.getIntegerValueField(.eventTargetUnixProcessID))
-        guard !settings.excludes(bundleID(of: target)) else { return true }
+        // Some wheel events have no usable target process. In that case the active
+        // app is the best available destination for deciding whether to smooth.
+        let activeApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        let destination = bundleID(of: target) ?? activeApp
+        guard !settings.excludes(destination), !settings.excludes(activeApp) else {
+            stopGlide()
+            return true
+        }
 
         let flags = event.flags
         var vertical = Self.lines(event, axis: 1)
@@ -309,6 +316,14 @@ final class ScrollEngine: NSObject, @unchecked Sendable {
     }
 
     private func post(_ pixels: (horizontal: Int, vertical: Int)) {
+        // A glide can outlive an app switch or a change to the exclusion list.
+        // Stop before sending any remaining synthetic scrolling into an excluded app.
+        let currentSettings = lock.withLock { sharedSettings }
+        guard currentSettings.enabled,
+              !currentSettings.excludes(NSWorkspace.shared.frontmostApplication?.bundleIdentifier) else {
+            stopGlide()
+            return
+        }
         guard pixels.horizontal != 0 || pixels.vertical != 0,
               let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2,
                                   wheel1: Int32(clamping: pixels.vertical), wheel2: Int32(clamping: pixels.horizontal),

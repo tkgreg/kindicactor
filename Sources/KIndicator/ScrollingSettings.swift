@@ -57,8 +57,8 @@ struct ScrollingSettings: View {
         SettingsGroup(title: "Try It") {
             tryItHere
         }
-        SettingsGroup(title: "Apps") {
-            SettingsNote(text: "These apps get the wheel's own scrolling: e.g. apps that flip a page per notch (Preview showing single pages, PowerPoint), games and remote desktops.")
+        SettingsGroup(title: "Disable Smooth Scrolling in Apps") {
+            SettingsNote(text: "Smooth scrolling is turned off in the apps below. They keep their normal mouse-wheel scrolling, without KIndicator's acceleration or reversal.")
             ForEach(settings.smoothScrolling.excludedApps) { app in
                 HStack(spacing: 8) {
                     Image(nsImage: AppIcon.small(path: app.path, bundleID: app.bundleID))
