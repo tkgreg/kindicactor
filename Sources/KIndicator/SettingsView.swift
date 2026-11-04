@@ -2,7 +2,7 @@ import KIndicatorCore
 import SwiftUI
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, layers, knob, mouse, scrolling, launchActions, connection, about
+    case general, layers, knob, mouse, scrolling, launchActions, commandApps, connection, about
 
     var id: String { rawValue }
 
@@ -14,6 +14,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .mouse: "Mouse"
         case .scrolling: "Scrolling"
         case .launchActions: "Launch Actions"
+        case .commandApps: "Command Apps"
         case .connection: "Connection"
         case .about: "About"
         }
@@ -27,6 +28,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .mouse: "computermouse"
         case .scrolling: "scroll"
         case .launchActions: "command"
+        case .commandApps: "apple.terminal"
         case .connection: "cable.connector"
         case .about: "info.circle"
         }
@@ -118,6 +120,7 @@ struct SettingsView: View {
         case .mouse: MouseSettings(settings: settings, mouse: mouse)
         case .scrolling: ScrollingSettings(settings: settings, scroll: scroll)
         case .launchActions: LaunchActionsSettings(settings: settings)
+        case .commandApps: CommandAppsSettings(settings: settings)
         case .connection: connectionPage
         case .about: AboutPage(updates: updates)
         }

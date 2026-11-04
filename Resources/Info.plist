@@ -26,6 +26,8 @@
 	<string>15.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>KIndicator asks Finder to set the comments of the command apps it makes, so that Get Info shows them.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 SMARTGREG PTE. LTD.</string>
 </dict>

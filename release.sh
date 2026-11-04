@@ -38,12 +38,16 @@ BIN_DIR=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)
 rm -rf "$DIST"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/$EXECUTABLE" "$APP/Contents/MacOS/$EXECUTABLE"
+# The program inside the command apps KIndicator makes.
+cp "$BIN_DIR/CommandHost" "$APP/Contents/MacOS/CommandHost"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp LICENSE "$APP/Contents/Resources/LICENSE"
 
 echo "==> Signing with $IDENTITY"
-codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+# CommandHost first: the app's signature seals the code inside it.
+codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP/Contents/MacOS/CommandHost"
+codesign --force --options runtime --timestamp --sign "$IDENTITY" --entitlements Resources/KIndicator.entitlements "$APP"
 codesign --verify --strict --verbose=2 "$APP"
 
 if $NOTARIZE; then
