@@ -79,6 +79,10 @@ final class CommandAppStore: ObservableObject {
             fromPropertyList: app.infoPlist(executable: app.fileName, version: version), format: .xml, options: 0)
         try plist.write(to: contents.appendingPathComponent("Info.plist"))
         try CommandAppIcon.writeICNS(for: app, to: contents.appendingPathComponent("Resources/AppIcon.icns"))
+        // SwiftTerm's licence asks for its notice in every copy.
+        if let notices = Bundle.main.url(forResource: "THIRD-PARTY-NOTICES", withExtension: nil) {
+            try fm.copyItem(at: notices, to: contents.appendingPathComponent("Resources/THIRD-PARTY-NOTICES"))
+        }
         try Self.signAdHoc(bundle)
 
         if let existing, fm.fileExists(atPath: existing.path) {

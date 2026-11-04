@@ -9,22 +9,25 @@ enum AppInfo {
     static let copyright = info("NSHumanReadableCopyright")
     static let repository = URL(string: "https://github.com/tkgreg/kindicactor")!
 
-    /// The bundled LICENSE, one string per paragraph: the file's hard line breaks are
-    /// joined so the text wraps to the window.
-    static let licenseParagraphs: [String] = {
-        guard let url = Bundle.main.url(forResource: "LICENSE", withExtension: nil),
+    static let licenseParagraphs = paragraphs(of: "LICENSE")
+    static let noticeParagraphs = paragraphs(of: "THIRD-PARTY-NOTICES")
+
+    /// A bundled text file, one string per paragraph: the file's hard line breaks are joined so
+    /// the text wraps to the window.
+    private static func paragraphs(of resource: String) -> [String] {
+        guard let url = Bundle.main.url(forResource: resource, withExtension: nil),
               let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
         return text.components(separatedBy: "\n\n")
             .map { $0.split(separator: "\n").joined(separator: " ") }
             .filter { !$0.isEmpty }
-    }()
+    }
 
     private static func info(_ key: String) -> String? {
         Bundle.main.object(forInfoDictionaryKey: key) as? String
     }
 }
 
-/// Settings › About: icon, version, update check and licence.
+/// Settings › About: icon, version, update check, licence and acknowledgements.
 struct AboutPage: View {
     @ObservedObject var updates: UpdateChecker
 
@@ -60,6 +63,19 @@ struct AboutPage: View {
             } else {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(AppInfo.licenseParagraphs, id: \.self) { paragraph in
+                        Text(paragraph)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            }
+        }
+        if !AppInfo.noticeParagraphs.isEmpty {
+            SettingsGroup(title: "Acknowledgements") {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(AppInfo.noticeParagraphs, id: \.self) { paragraph in
                         Text(paragraph)
                             .fixedSize(horizontal: false, vertical: true)
                     }

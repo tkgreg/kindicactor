@@ -19,6 +19,7 @@ cp "$BIN_DIR/CommandHost" "$APP/Contents/MacOS/CommandHost"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp LICENSE "$APP/Contents/Resources/LICENSE"
+cp Resources/THIRD-PARTY-NOTICES "$APP/Contents/Resources/THIRD-PARTY-NOTICES"
 
 # A stable signing identity keeps the login item and macOS's permissions (Accessibility) valid
 # across rebuilds. The releases' Developer ID first, so they also carry over between a local

@@ -43,6 +43,7 @@ cp "$BIN_DIR/CommandHost" "$APP/Contents/MacOS/CommandHost"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp LICENSE "$APP/Contents/Resources/LICENSE"
+cp Resources/THIRD-PARTY-NOTICES "$APP/Contents/Resources/THIRD-PARTY-NOTICES"
 
 echo "==> Signing with $IDENTITY"
 # CommandHost first: the app's signature seals the code inside it.
