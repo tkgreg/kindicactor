@@ -29,21 +29,52 @@ struct LaunchAction: Codable, Identifiable, Equatable {
 @MainActor
 final class LaunchActionRunner {
     private let settings: AppSettings
-    private var subscription: AnyCancellable?
+    private var subscriptions: Set<AnyCancellable> = []
+    private var actions: [LaunchAction] = []
+    /// The frontmost app's bundle, whose own shortcut is left to it: ⌘⇧N opens Zed from
+    /// elsewhere, but in Zed it's Zed's ⌘⇧N.
+    private var frontmost: (path: String?, bundleID: String?) = (nil, nil)
 
     init(settings: AppSettings) {
         self.settings = settings
     }
 
     func start() {
-        subscription = settings.$launchActions.sink { [weak self] actions in
-            self?.register(actions)
-        }
+        noteFrontmost(NSWorkspace.shared.frontmostApplication)
+        settings.$launchActions.sink { [weak self] actions in
+            self?.actions = actions
+            self?.register()
+        }.store(in: &subscriptions)
+        NSWorkspace.shared.notificationCenter
+            .publisher(for: NSWorkspace.didActivateApplicationNotification)
+            .sink { [weak self] note in
+                let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+                self?.noteFrontmost(app)
+                self?.register()
+            }.store(in: &subscriptions)
     }
 
-    private func register(_ actions: [LaunchAction]) {
+    private func noteFrontmost(_ app: NSRunningApplication?) {
+        frontmost = (app?.bundleURL.map(Self.resolved), app?.bundleIdentifier)
+    }
+
+    private static func resolved(_ url: URL) -> String {
+        url.standardizedFileURL.resolvingSymlinksInPath().path
+    }
+
+    /// Whether `action` opens the app that's frontmost now.
+    private func opensFrontmost(_ action: LaunchAction) -> Bool {
+        guard let appPath = action.appPath else { return false }
+        let url = URL(fileURLWithPath: appPath)
+        if let path = frontmost.path, Self.resolved(url) == path { return true }
+        if let id = frontmost.bundleID, Bundle(url: url)?.bundleIdentifier == id { return true }
+        return false
+    }
+
+    private func register() {
         HotkeyCenter.shared.set(actions.compactMap { action in
-            action.hotkey.map { hotkey in
+            guard !opensFrontmost(action) else { return nil }
+            return action.hotkey.map { hotkey in
                 (hotkey: hotkey, action: { [weak self] in self?.run(action) })
             }
         }, for: .launchActions)

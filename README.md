@@ -58,7 +58,8 @@ KIndicator reads the active layer from the keyboard and shows it in the menu bar
 - **Launch actions.** One global shortcut switches the input language, then opens
   an app. For example, switch to English, then open Launchpad, so typing to
   search always works even when Russian was selected. Put the shortcut on a
-  keyboard key (e.g. F4) with a Keychron Launcher macro.
+  keyboard key (e.g. F4) with a Keychron Launcher macro. While the app is in front,
+  the shortcut is left to it, so ⌘⇧N can open Zed and still be Zed's own ⌘⇧N there.
 - **Command apps.** Make any shell command an app with its own window: htop, a dev
   server, an AI agent or a script of several lines. It's saved in `~/Applications`,
   so Spotlight, Launchpad and the Dock open it like any app, and a launch action puts
